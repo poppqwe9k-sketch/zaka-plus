@@ -8,8 +8,8 @@ const initialMessage = {
 
 const models = [
   { id: 'gemini', label: 'Gemini 3.8 Flash' },
-  { id: 'qwen', label: 'Qwen 2.5 72B' },
-  { id: 'deepseek', label: 'DeepSeek R1' },
+  { id: 'deepseek-v4-flash', label: 'DeepSeek-V4.1-Flash' },
+  { id: 'claude-sonnet-5-5', label: 'Claude Sonnet 5.5' },
   { id: 'llama', label: 'Llama 3.3 70B (سريع وذكي)' }
 ];
 const geminiModels = [
@@ -35,12 +35,15 @@ async function getAssistantReply(conversation, selectedModel) {
       .filter((message) => message.id !== 'welcome' && !message.id.startsWith('error-'))
       .slice(-MAX_REQUEST_MESSAGES)
       .map(({ role, content }) => ({ role, content }));
-    const model = selectedModel === 'gemini' ? geminiModels[0] : selectedModel;
     const response = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       signal: controller.signal,
-      body: JSON.stringify({ model, models: geminiModels, messages })
+      body: JSON.stringify({
+        model: selectedModel === 'gemini' ? geminiModels[0] : selectedModel,
+        models: geminiModels,
+        messages
+      })
     });
     const result = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(result.error || `تعذر الاتصال بالمساعد (HTTP ${response.status}).`);
@@ -126,11 +129,9 @@ export default function App() {
     const requestId = ++requestIdRef.current;
 
     setMessagesByChat((current) => ({ ...current, [chatId]: updatedMessages }));
-    setChats((current) => current.map((chat) => (
-      chat.id === chatId && chat.title === 'محادثة جديدة'
-        ? { ...chat, title: text.length > 34 ? `${text.slice(0, 34)}…` : text }
-        : chat
-    )));
+    setChats((current) => current.map((chat) => chat.id === chatId && chat.title === 'محادثة جديدة'
+      ? { ...chat, title: text.length > 34 ? `${text.slice(0, 34)}…` : text }
+      : chat));
     setInput('');
     setIsLoading(true);
     if (textareaRef.current) textareaRef.current.style.height = 'auto';

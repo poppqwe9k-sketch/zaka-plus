@@ -1,15 +1,14 @@
-const DEFAULT_GEMINI_MODEL = 'gemini-3.8-flash';
-const DEFAULT_GEMINI_POOL = [
+const GEMINI_MODEL_POOL = [
   'gemini-3.8-flash',
   'gemini-3.8-flash-lite',
   'gemini-3.5-flash',
   'gemini-3.5-flash-lite'
 ];
 const GEMINI_API_VERSION = 'v1beta';
+const GEMINI_TIMEOUT_MS = 12000;
+const PROVIDER_TIMEOUT_MS = 15000;
 const MAX_HISTORY_MESSAGES = 6;
 const MAX_MESSAGE_LENGTH = 12000;
-const REQUEST_TIMEOUT_MS = 15000;
-const WORKERS_AI_TIMEOUT_MS = 15000;
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
@@ -18,10 +17,10 @@ const CORS_HEADERS = {
   'Cache-Control': 'no-store'
 };
 const WORKERS_AI_MODELS = {
-  qwen: '@cf/qwen/qwen2.5-72b-instruct',
-  deepseek: '@cf/deepseek-ai/deepseek-r1-distill-qwen-32b',
+  'deepseek-v4-flash': '@cf/deepseek-ai/deepseek-v4.1-flash-1017',
   llama: '@cf/meta/llama-3.3-70b-instruct-fp8-fast'
 };
+const ANTHROPIC_MODEL = 'claude-sonnet-5-5';
 
 function jsonResponse(payload, status = 200) {
   return new Response(JSON.stringify(payload), {
@@ -30,18 +29,12 @@ function jsonResponse(payload, status = 200) {
   });
 }
 
-function normalizeModelName(value, fallback = '') {
-  if (typeof value !== 'string' || !value.trim()) return fallback;
-  const model = value.trim();
-  return model.startsWith('models/') ? model.slice(7) : model;
-}
-
 function extractMessages(body) {
   let input = Array.isArray(body?.messages) ? body.messages.slice(-MAX_HISTORY_MESSAGES) : [];
   if (!input.length && typeof body?.message === 'string') input = [{ role: 'user', content: body.message }];
   if (!input.length && typeof body?.prompt === 'string') input = [{ role: 'user', content: body.prompt }];
-
   const messages = [];
+
   for (const item of input) {
     if (!item || !['user', 'assistant', 'model'].includes(item.role) || typeof item.content !== 'string') continue;
     const content = item.content.trim();
@@ -64,124 +57,146 @@ function toGeminiContents(messages) {
 
 function extractGeminiText(data) {
   const parts = data?.candidates?.[0]?.content?.parts;
-  return Array.isArray(parts)
-    ? parts.map((part) => typeof part?.text === 'string' ? part.text : '').join('').trim()
-    : '';
+  return Array.isArray(parts) ? parts.map((part) => typeof part?.text === 'string' ? part.text : '').join('').trim() : '';
 }
 
-async function callGemini({ apiKey, model, contents, systemInstruction, maxOutputTokens }) {
-  const modelName = normalizeModelName(model, DEFAULT_GEMINI_MODEL);
-  const endpoint = `https://generativelanguage.googleapis.com/${GEMINI_API_VERSION}/models/${encodeURIComponent(modelName)}:generateContent`;
-  const generationConfig = { temperature: 0.7 };
-  if (Number.isFinite(maxOutputTokens) && maxOutputTokens > 0) {
-    generationConfig.maxOutputTokens = Math.min(maxOutputTokens, 8192);
-  }
-
-  const payload = { contents, generationConfig };
-  if (typeof systemInstruction === 'string' && systemInstruction.trim()) {
-    payload.systemInstruction = { parts: [{ text: systemInstruction.trim() }] };
-  }
-
+async function callGemini({ apiKey, model, messages, systemInstruction }) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), GEMINI_TIMEOUT_MS);
+  const endpoint = `https://generativelanguage.googleapis.com/${GEMINI_API_VERSION}/models/${encodeURIComponent(model)}:generateContent`;
   try {
     const response = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({
+        contents: toGeminiContents(messages),
+        systemInstruction: { parts: [{ text: systemInstruction }] },
+        generationConfig: { temperature: 0.7 }
+      }),
       signal: controller.signal
     });
-    const data = await response.json().catch(() => null);
-    if (!response.ok) {
-      return {
-        ok: false,
-        status: response.status,
-        model: modelName,
-        error: data?.error?.message || response.statusText || `HTTP ${response.status}`
-      };
-    }
-
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) return { ok: false, status: response.status, model, error: data?.error?.message || `Gemini API returned HTTP ${response.status}.` };
     const reply = extractGeminiText(data);
-    return reply
-      ? { ok: true, status: 200, model: modelName, reply }
-      : { ok: false, status: 502, model: modelName, error: 'Gemini returned no usable text.' };
+    return reply ? { ok: true, reply, model } : { ok: false, status: 502, model, error: 'Gemini returned an empty response.' };
   } catch (error) {
-    const timedOut = error?.name === 'AbortError';
     return {
       ok: false,
-      status: timedOut ? 504 : 502,
-      model: modelName,
-      error: timedOut ? 'Gemini request timed out.' : 'Unable to reach Gemini temporarily.'
+      status: error?.name === 'AbortError' ? 504 : 502,
+      model,
+      error: error?.name === 'AbortError' ? 'Gemini request timed out.' : 'Could not connect to Gemini.'
     };
   } finally {
     clearTimeout(timer);
   }
 }
 
-function buildGeminiModelOrder(primaryModel, userModels, envModel) {
-  const allowed = new Set(DEFAULT_GEMINI_POOL);
-  const ordered = [];
-  const seen = new Set();
-  const add = (value) => {
-    const model = normalizeModelName(value);
-    if (!model || !allowed.has(model) || seen.has(model)) return;
-    seen.add(model);
-    ordered.push(model);
-  };
+async function answerWithGemini(env, messages, body) {
+  const apiKey = typeof env?.GEMINI_API_KEY === 'string' ? env.GEMINI_API_KEY.trim() : '';
+  if (!apiKey) return jsonResponse({ error: 'Gemini is not configured: add GEMINI_API_KEY as a Worker secret.' }, 503);
 
-  add(primaryModel);
-  add(envModel);
-  if (Array.isArray(userModels)) userModels.forEach(add);
-  DEFAULT_GEMINI_POOL.forEach(add);
-  return ordered.length ? ordered : [DEFAULT_GEMINI_MODEL];
-}
+  const requested = typeof body?.model === 'string' && body.model.startsWith('gemini-') ? body.model : GEMINI_MODEL_POOL[0];
+  const supplied = Array.isArray(body?.models) ? body.models : [];
+  const candidates = [...new Set([requested, ...supplied, ...GEMINI_MODEL_POOL].filter((model) => GEMINI_MODEL_POOL.includes(model)))];
+  let lastResult;
 
-async function runAcrossGeminiModels(options) {
-  const models = buildGeminiModelOrder(options.primaryModel, options.userModels, options.envModel);
-  let lastResult = null;
-
-  for (let index = 0; index < models.length; index += 1) {
-    const result = await callGemini({ ...options, model: models[index] });
-    if (result.ok) return { ...result, switchedFromPrimary: index > 0 };
+  for (let index = 0; index < candidates.length; index += 1) {
+    const result = await callGemini({
+      apiKey,
+      model: candidates[index],
+      messages,
+      systemInstruction: typeof body?.systemInstruction === 'string'
+        ? body.systemInstruction
+        : 'You are Zaka+, a helpful assistant. Respond clearly in Arabic unless asked otherwise.'
+    });
+    if (result.ok) {
+      return jsonResponse({ reply: result.reply, model: result.model, provider: 'gemini', fallbackUsed: index > 0 });
+    }
     lastResult = result;
-    if ([400, 401, 403].includes(result.status)) return result;
+    if ([400, 401, 403].includes(result.status)) break;
   }
 
-  return lastResult || {
-    ok: false,
-    status: 503,
-    model: DEFAULT_GEMINI_MODEL,
-    error: 'All Gemini models are temporarily unavailable.'
-  };
+  const status = lastResult?.status >= 400 && lastResult.status < 600 ? lastResult.status : 502;
+  return jsonResponse({
+    error: `Gemini could not complete the request (${lastResult?.error || 'unknown provider error'}).`,
+    model: lastResult?.model || requested,
+    status
+  }, status);
 }
 
-function normalizeWorkersReply(output) {
-  const content = output?.response ?? output?.result?.response ?? output?.choices?.[0]?.message?.content;
-  if (typeof content === 'string') return content.trim();
-  if (Array.isArray(content)) return content.map((part) => typeof part === 'string' ? part : part?.text || '').join('').trim();
+function extractWorkersAIText(result) {
+  const value = result?.response ?? result?.result?.response ?? result?.choices?.[0]?.message?.content;
+  if (typeof value === 'string') return value.trim();
+  if (Array.isArray(value)) return value.map((part) => typeof part === 'string' ? part : part?.text || '').join('').trim();
   return '';
 }
 
-async function tryWorkersAI({ env, messages, systemInstruction, model }) {
+async function callWorkersAI(env, model, messages, systemInstruction) {
   const binding = env?.MY_BINDING || env?.AI;
-  if (!binding || typeof binding.run !== 'function') return null;
+  if (!binding || typeof binding.run !== 'function') {
+    return { ok: false, status: 503, error: 'Workers AI is unavailable: configure the MY_BINDING AI binding in Wrangler.' };
+  }
 
-  const modelId = model || (typeof env?.WORKERS_AI_MODEL === 'string' && env.WORKERS_AI_MODEL.trim()) || WORKERS_AI_MODELS.llama;
   let timer;
   try {
-    const output = await Promise.race([
-      binding.run(modelId, {
+    const result = await Promise.race([
+      binding.run(model, {
         messages: [
-          ...(systemInstruction ? [{ role: 'system', content: systemInstruction }] : []),
+          { role: 'system', content: systemInstruction },
           ...messages.map(({ role, content }) => ({ role, content }))
         ]
       }),
       new Promise((_, reject) => {
-        timer = setTimeout(() => reject(new Error('Workers AI request timed out.')), WORKERS_AI_TIMEOUT_MS);
+        timer = setTimeout(() => reject(new Error('Workers AI request timed out.')), PROVIDER_TIMEOUT_MS);
       })
     ]);
-    const reply = normalizeWorkersReply(output);
-    return reply ? { ok: true, status: 200, model: modelId, reply, switchedFromPrimary: true } : null;
+    const reply = extractWorkersAIText(result);
+    return reply ? { ok: true, reply, model } : { ok: false, status: 502, error: `${model} returned an empty response.` };
+  } catch (error) {
+    return { ok: false, status: 502, error: error?.message || `Workers AI request failed for ${model}.` };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function callClaude(env, messages, systemInstruction) {
+  const apiKey = typeof env?.ANTHROPIC_API_KEY === 'string' ? env.ANTHROPIC_API_KEY.trim() : '';
+  if (!apiKey) {
+    return { ok: false, status: 503, error: 'Claude Sonnet 5.5 is not configured: add ANTHROPIC_API_KEY as a Worker secret.' };
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), PROVIDER_TIMEOUT_MS);
+  try {
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01'
+      },
+      body: JSON.stringify({
+        model: ANTHROPIC_MODEL,
+        max_tokens: 2048,
+        system: systemInstruction,
+        messages: messages.map(({ role, content }) => ({ role, content }))
+      }),
+      signal: controller.signal
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      return { ok: false, status: response.status, error: data?.error?.message || `Anthropic API returned HTTP ${response.status}.` };
+    }
+    const reply = Array.isArray(data?.content)
+      ? data.content.filter((part) => part.type === 'text').map((part) => part.text || '').join('').trim()
+      : '';
+    return reply ? { ok: true, reply, model: ANTHROPIC_MODEL } : { ok: false, status: 502, error: 'Claude Sonnet 5.5 returned an empty response.' };
+  } catch (error) {
+    return {
+      ok: false,
+      status: error?.name === 'AbortError' ? 504 : 502,
+      error: error?.name === 'AbortError' ? 'Claude request timed out.' : 'Could not connect to the Anthropic API.'
+    };
   } finally {
     clearTimeout(timer);
   }
@@ -202,64 +217,39 @@ async function handleChat(request, env) {
   if (!messages.length) return jsonResponse({ error: 'Please enter a message before sending.' }, 400);
   if (messages[0].role !== 'user') return jsonResponse({ error: 'The first message must be from the user.' }, 400);
 
+  const model = typeof body?.model === 'string' ? body.model : 'gemini';
   const systemInstruction = typeof body?.systemInstruction === 'string'
     ? body.systemInstruction
     : 'You are Zaka+, a helpful assistant. Respond clearly in Arabic unless asked otherwise.';
-  const apiKey = typeof env?.GEMINI_API_KEY === 'string' ? env.GEMINI_API_KEY.trim() : '';
-  const requestedModel = typeof body?.model === 'string' ? body.model.trim() : '';
-  const userModels = Array.isArray(body?.models) ? body.models : [];
-  const envModel = typeof env?.GEMINI_MODEL === 'string' ? env.GEMINI_MODEL.trim() : '';
-  const maxOutputTokens = Number.isFinite(body?.maxOutputTokens) ? body.maxOutputTokens : undefined;
 
-  try {
-    if (Object.hasOwn(WORKERS_AI_MODELS, requestedModel)) {
-      const result = await tryWorkersAI({ env, messages, systemInstruction, model: WORKERS_AI_MODELS[requestedModel] });
-      if (!result) return jsonResponse({ error: 'The selected Workers AI model is unavailable or not configured.' }, 503);
-      return jsonResponse({ reply: result.reply, model: requestedModel, provider: 'workers-ai' });
-    }
-
-    if (!apiKey) {
-      const fallback = await tryWorkersAI({ env, messages, systemInstruction });
-      if (fallback?.ok) {
-        return jsonResponse({ reply: fallback.reply, model: fallback.model, provider: 'workers-ai', switchedFromPrimary: true });
-      }
-      return jsonResponse({ error: 'GEMINI_API_KEY is not configured in the Cloudflare Worker.' }, 503);
-    }
-
-    const result = await runAcrossGeminiModels({
-      apiKey,
-      primaryModel: requestedModel.startsWith('gemini-') ? requestedModel : DEFAULT_GEMINI_MODEL,
-      userModels,
-      envModel,
-      contents: toGeminiContents(messages),
-      systemInstruction,
-      maxOutputTokens
-    });
-    if (result.ok) {
-      return jsonResponse({
-        reply: result.reply,
-        model: result.model,
-        provider: 'gemini',
-        switchedFromPrimary: Boolean(result.switchedFromPrimary)
-      });
-    }
-
-    const fallback = await tryWorkersAI({ env, messages, systemInstruction });
-    if (fallback?.ok) {
-      return jsonResponse({ reply: fallback.reply, model: fallback.model, provider: 'workers-ai', switchedFromPrimary: true });
-    }
-
-    const status = result.status >= 400 && result.status < 600 ? result.status : 502;
-    return jsonResponse({ error: `Gemini request failed (HTTP ${status}): ${result.error}`, model: result.model, status }, status);
-  } catch {
-    return jsonResponse({ error: 'An internal error occurred while processing the chat request.' }, 502);
+  if (model === 'gemini' || model.startsWith('gemini-')) return answerWithGemini(env, messages, body);
+  if (model === 'deepseek-v4-flash' || model === 'llama') {
+    const modelId = WORKERS_AI_MODELS[model];
+    const result = await callWorkersAI(env, modelId, messages, systemInstruction);
+    return result.ok
+      ? jsonResponse({ reply: result.reply, model, provider: 'workers-ai' })
+      : jsonResponse({ error: result.error, model, status: result.status }, result.status);
   }
+  if (model === 'claude-sonnet-5-5') {
+    const result = await callClaude(env, messages, systemInstruction);
+    return result.ok
+      ? jsonResponse({ reply: result.reply, model: result.model, provider: 'anthropic' })
+      : jsonResponse({ error: result.error, model: ANTHROPIC_MODEL, status: result.status }, result.status);
+  }
+
+  return jsonResponse({ error: 'The selected model is not supported.' }, 400);
 }
 
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    if (url.pathname === '/api/chat') return handleChat(request, env);
+    if (url.pathname === '/api/chat') {
+      try {
+        return await handleChat(request, env);
+      } catch {
+        return jsonResponse({ error: 'The chat request failed unexpectedly. Please try again.' }, 502);
+      }
+    }
     if (env?.ASSETS && typeof env.ASSETS.fetch === 'function') return env.ASSETS.fetch(request);
     return new Response('Not Found', { status: 404 });
   }
