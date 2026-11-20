@@ -1,1 +1,3 @@
-/* /index.html 200
+# No explicit rewrite rules are needed for this SPA.
+# Cloudflare Pages serves index.html as its default SPA fallback.
+# Keep this file free of /* -> /index.html rules to avoid redirect loops.

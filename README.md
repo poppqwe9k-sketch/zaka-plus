@@ -1,6 +1,6 @@
 # ذكاء بلس | Zaka+
 
-واجهة دردشة عربية RTL مبنية باستخدام React وVite، كتطبيق ويب ثابت (SPA).
+واجهة دردشة عربية RTL مبنية باستخدام React وVite كتطبيق ويب ثابت (SPA).
 
 ## التشغيل والبناء
 
@@ -11,7 +11,7 @@ npm run build
 npm run preview
 ```
 
-أمر `npm run build` ينشئ الموقع الثابت داخل `dist/`، بما في ذلك `dist/index.html` والأصول المبنية وملفات `public/`. لا ينفّذ أمر البناء أي نشر عبر Wrangler.
+ينشئ `npm run build` ملفات الموقع الثابت داخل `dist/`. لا يشغّل أمر Wrangler أو أي خطوة نشر.
 
 ## Cloudflare Pages
 
@@ -19,4 +19,4 @@ npm run preview
 - Build command: `npm run build`
 - Build output directory: `dist`
 
-يجب إعداد Cloudflare Pages لنشر مجلد `dist` الناتج عن البناء. يحتوي `public/_redirects` على قاعدة SPA لتوجيه المسارات إلى `index.html`.
+عند نشر هذا التطبيق على Cloudflare Pages، يُقدَّم `index.html` تلقائياً كـ fallback لتطبيق SPA. ملف `public/_redirects` لا يحتوي على قواعد تحويل فعلية؛ تجنّب قاعدة `/* /index.html 200` إذا كان إعداد النشر يفعّل SPA fallback، لأنها قد تؤدي إلى حلقة تحويل. لا يوجد ملف `wrangler.jsonc` أو إعداد Wrangler ضمن ملفات المستودع الحالية.
