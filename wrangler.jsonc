@@ -3,6 +3,9 @@
   "name": "zaka-plus",
   "main": "worker.js",
   "compatibility_date": "2025-04-08",
+  "ai": {
+    "binding": "MY_BINDING"
+  },
   "assets": {
     "directory": "./dist",
     "binding": "ASSETS",

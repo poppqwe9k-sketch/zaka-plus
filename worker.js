@@ -12,6 +12,7 @@ const MODELS = {
   deepseek: { provider: 'cloudflare', id: '@cf/deepseek-ai/deepseek-r1-distill-qwen-32b', label: 'DeepSeek R1 Distill Qwen 32B' },
   llama: { provider: 'cloudflare', id: '@cf/meta/llama-3.3-70b-instruct-fp8-fast', label: 'Llama 3.3 70B (سريع وذكي)' }
 };
+const GEMINI_FALLBACK_MODEL = 'gemini-3.8-flash-lite';
 const MAX_MESSAGES = 50;
 const MAX_MESSAGE_LENGTH = 12000;
 
@@ -29,8 +30,7 @@ function normalizeReply(result) {
   return '';
 }
 
-async function callGemini(messages, apiKey) {
-  if (!apiKey) throw new Error('نموذج Gemini غير مهيأ: تحقق من إضافة GEMINI_API_KEY كـ Secret.');
+function toGeminiContents(messages) {
   const contents = [];
   for (const message of messages) {
     const role = message.role === 'assistant' ? 'model' : 'user';
@@ -38,30 +38,66 @@ async function callGemini(messages, apiKey) {
     if (previous?.role === role) previous.parts[0].text += `\n\n${message.content}`;
     else contents.push({ role, parts: [{ text: message.content }] });
   }
-  if (contents[0]?.role !== 'user') throw new Error('يجب أن تبدأ المحادثة برسالة من المستخدم.');
-
-  const endpoint = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent';
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
-    body: JSON.stringify({ contents })
-  });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data?.error?.message || `تعذر الاتصال بـ Gemini (HTTP ${response.status}).`);
-  return data?.candidates?.[0]?.content?.parts?.map((part) => part.text || '').join('').trim() || '';
+  return contents;
 }
 
-async function callCloudflare(env, model, messages) {
-  if (!env.MY_BINDING || typeof env.MY_BINDING.run !== 'function') {
-    throw new Error('ربط Cloudflare Workers AI غير مهيأ. تحقق من ربط MY_BINDING.');
+async function callGemini(messages, apiKey, modelId) {
+  if (!apiKey) return { ok: false, status: 503, error: 'خدمة Gemini غير مهيأة حالياً.' };
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelId)}:generateContent`;
+  let response;
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+      body: JSON.stringify({ contents: toGeminiContents(messages), generationConfig: { temperature: 0.7 } })
+    });
+  } catch {
+    return { ok: false, status: 0, error: 'تعذر الاتصال بخدمة Gemini.' };
   }
-  const result = await env.MY_BINDING.run(model.id, {
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    return { ok: false, status: response.status, error: data?.error?.message || `تعذر الاتصال بخدمة Gemini (HTTP ${response.status}).` };
+  }
+  const reply = data?.candidates?.[0]?.content?.parts?.map((part) => typeof part.text === 'string' ? part.text : '').join('').trim();
+  return reply
+    ? { ok: true, reply, model: modelId }
+    : { ok: false, status: 502, error: 'لم يُرجع Gemini نصاً صالحاً.' };
+}
+
+async function callWorkersAI(env, model, messages) {
+  const binding = env?.MY_BINDING || env?.AI;
+  if (!binding || typeof binding.run !== 'function') return null;
+  const result = await binding.run(model.id, {
     messages: [
       { role: 'system', content: 'أنت مساعد ذكي مفيد يتحدث العربية بطلاقة ووضوح.' },
       ...messages.map(({ role, content }) => ({ role: role === 'assistant' ? 'assistant' : 'user', content }))
     ]
   });
-  return normalizeReply(result);
+  const reply = normalizeReply(result);
+  return reply ? { reply, model: model.id } : null;
+}
+
+async function answerWithGemini(env, messages) {
+  const apiKey = typeof env?.GEMINI_API_KEY === 'string' ? env.GEMINI_API_KEY.trim() : '';
+  const primary = await callGemini(messages, apiKey, MODELS.gemini.id);
+  if (primary.ok) return json({ reply: primary.reply, model: 'gemini' });
+
+  let geminiResult = primary;
+  if (primary.status === 503 || primary.status === 404) {
+    geminiResult = await callGemini(messages, apiKey, GEMINI_FALLBACK_MODEL);
+    if (geminiResult.ok) return json({ reply: geminiResult.reply, model: 'gemini', fallbackUsed: true });
+  }
+
+  // Workers AI is an optional last-resort fallback. Missing binding must not
+  // replace the useful Gemini error with an internal binding-name message.
+  try {
+    const fallback = await callWorkersAI(env, MODELS.llama, messages);
+    if (fallback) return json({ reply: fallback.reply, model: 'llama', fallbackUsed: true });
+  } catch {
+    // Return the Gemini provider error below if the optional fallback is unavailable.
+  }
+  return json({ error: geminiResult.error || 'تعذر إكمال الطلب إلى Gemini.' }, 502);
 }
 
 async function handleChat(request, env) {
@@ -80,42 +116,27 @@ async function handleChat(request, env) {
   if (!Array.isArray(messages) || messages.length === 0 || messages.length > MAX_MESSAGES) {
     return json({ error: 'سجل المحادثة غير صالح أو طويل جداً.' }, 400);
   }
+  const cleanMessages = [];
   for (const message of messages) {
     if (!message || !['user', 'assistant'].includes(message.role) || typeof message.content !== 'string') {
       return json({ error: 'صيغة إحدى رسائل المحادثة غير صالحة.' }, 400);
     }
-    message.content = message.content.trim();
-    if (!message.content || message.content.length > MAX_MESSAGE_LENGTH) {
+    const content = message.content.trim();
+    if (!content || content.length > MAX_MESSAGE_LENGTH) {
       return json({ error: 'إحدى الرسائل فارغة أو تتجاوز الحد المسموح.' }, 400);
     }
+    cleanMessages.push({ role: message.role, content });
   }
-  if (messages[0].role !== 'user') return json({ error: 'ابدأ المحادثة برسالة من المستخدم.' }, 400);
+  if (cleanMessages[0].role !== 'user') return json({ error: 'ابدأ المحادثة برسالة من المستخدم.' }, 400);
 
-  if (modelKey === 'gemini') {
-    try {
-      const reply = await callGemini(messages, typeof env.GEMINI_API_KEY === 'string' ? env.GEMINI_API_KEY.trim() : '');
-      if (reply) return json({ reply, model: modelKey });
-      // Treat an empty Gemini response as a provider failure and transparently fall back.
-    } catch {
-      // Automatically retry this conversation with the configured Cloudflare fallback model.
-    }
-
-    const fallbackModel = MODELS.llama;
-    try {
-      const reply = await callCloudflare(env, fallbackModel, messages);
-      if (reply) return json({ reply, model: 'llama', fallbackUsed: true });
-      return json({ error: `لم يُرجع ${fallbackModel.label} نصاً. حاول مرة أخرى.` }, 502);
-    } catch (error) {
-      return json({ error: error?.message || `تعذر إكمال الطلب إلى ${fallbackModel.label}.` }, 502);
-    }
-  }
+  if (modelKey === 'gemini') return answerWithGemini(env, cleanMessages);
 
   try {
-    const reply = await callCloudflare(env, model, messages);
-    if (!reply) return json({ error: `لم يُرجع ${model.label} نصاً. حاول مرة أخرى.` }, 502);
-    return json({ reply, model: modelKey });
-  } catch (error) {
-    return json({ error: error?.message || `تعذر إكمال الطلب إلى ${model.label}.` }, 502);
+    const result = await callWorkersAI(env, model, cleanMessages);
+    if (!result) return json({ error: 'النموذج المحدد غير متاح حالياً.' }, 503);
+    return json({ reply: result.reply, model: modelKey });
+  } catch {
+    return json({ error: 'تعذر إكمال الطلب إلى النموذج المحدد. حاول مرة أخرى.' }, 502);
   }
 }
 
@@ -125,7 +146,11 @@ export default {
     if (url.pathname === '/api/chat') {
       if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS_HEADERS });
       if (request.method !== 'POST') return json({ error: 'يرجى إرسال الطلب بصيغة POST.' }, 405);
-      return handleChat(request, env);
+      try {
+        return await handleChat(request, env);
+      } catch {
+        return json({ error: 'حدث خطأ داخلي أثناء معالجة الطلب.' }, 502);
+      }
     }
     return env.ASSETS.fetch(request);
   }
