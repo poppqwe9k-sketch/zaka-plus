@@ -1,7 +1,8 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
-// Cloudflare Pages serves the generated static SPA; deployment is not part of build.
+// Build a static single-page app for Cloudflare Pages. Hosting performs the
+// deployment; this config intentionally contains no Wrangler deploy command.
 export default defineConfig({
   appType: 'spa',
   plugins: [react()],
