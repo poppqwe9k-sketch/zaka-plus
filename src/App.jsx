@@ -12,6 +12,14 @@ const models = [
   { id: 'deepseek', label: 'DeepSeek R1' },
   { id: 'llama', label: 'Llama 3.3 70B (سريع وذكي)' }
 ];
+const geminiModels = [
+  'gemini-3.8-flash',
+  'gemini-3.8-flash-lite',
+  'gemini-3.5-flash',
+  'gemini-3.5-flash-lite'
+];
+const MAX_REQUEST_MESSAGES = 10;
+const CLIENT_TIMEOUT_MS = 75000;
 
 const suggestions = [
   { title: 'اكتب لي رسالة', detail: 'صياغة رسالة واضحة ومناسبة' },
@@ -19,29 +27,26 @@ const suggestions = [
   { title: 'ساعدني في فكرة', detail: 'عصف ذهني واقتراحات جديدة' }
 ];
 
-const CLIENT_TIMEOUT_MS = 30000;
-
 async function getAssistantReply(conversation, model) {
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), CLIENT_TIMEOUT_MS);
   try {
+    const messages = conversation
+      .filter((message) => message.id !== 'welcome' && !message.id.startsWith('error-'))
+      .slice(-MAX_REQUEST_MESSAGES)
+      .map(({ role, content }) => ({ role, content }));
     const response = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       signal: controller.signal,
-      body: JSON.stringify({
-        model,
-        messages: conversation
-          .filter((message) => message.id !== 'welcome' && !message.id.startsWith('error-'))
-          .map(({ role, content }) => ({ role, content }))
-      })
+      body: JSON.stringify({ model, models: geminiModels, messages })
     });
     const result = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(result.error || `تعذر الاتصال بالمساعد (HTTP ${response.status}).`);
     if (typeof result.reply !== 'string' || !result.reply.trim()) throw new Error('لم يصل رد نصي من النموذج المختار. حاول مرة أخرى.');
     return result.reply;
   } catch (error) {
-    if (error?.name === 'AbortError') throw new Error('استغرق الطلب وقتاً أطول من المتوقع (30 ثانية). تحقق من الاتصال ثم أعد المحاولة.');
+    if (error?.name === 'AbortError') throw new Error('انتهت مهلة الطلب. تحقق من الاتصال ثم أعد المحاولة.');
     throw error;
   } finally {
     window.clearTimeout(timeout);
@@ -169,7 +174,7 @@ export default function App() {
         </header>
         <section className={`conversation${isEmptyChat ? ' conversation-empty' : ''}`} aria-label="المحادثة">
           {isEmptyChat ? <div className="welcome-panel"><div className="welcome-mark"><BrandMark /></div><h1>كيف أقدر أساعدك؟</h1><p>اسأل، اكتب، أو ابدأ بفكرة — وأنا أساعدك في الخطوة التالية.</p><div className="suggestion-grid">{suggestions.map((suggestion) => <button className="suggestion-card" key={suggestion.title} type="button" onClick={() => { setInput(suggestion.title); textareaRef.current?.focus(); }}><span className="suggestion-title">{suggestion.title}</span><span className="suggestion-detail">{suggestion.detail}</span></button>)}</div></div> : <div className="message-list">
-            {messages.filter((message) => message.id !== 'welcome').map((message) => <article className={`message message-${message.role}`} key={message.id}>{message.role === 'assistant' && <BrandMark small />}<div className="message-body">{message.role === 'assistant' && <div className="message-author">ذكاء بلس</div>}<div className="message-content">{message.content}</div>{message.role === 'assistant' && !message.id.startsWith('error-') && <button className="copy-button" type="button" onClick={() => copyMessage(message)} aria-label="نسخ الرد"><CopyIcon /><span>{copiedId === message.id ? 'تم النسخ' : 'نسخ'}</span></button>}</div></article>)}
+            {messages.filter((message) => message.id !== 'welcome').map((message) => <article className={`message message-${message.role}`} key={message.id}>{message.role === 'assistant' && <BrandMark small />}<div className="message-body">{message.role === 'assistant' && <div className="message-author">ذكاء بلس</div>}<div className="message-content">{message.content}</div>{message.role === 'assistant' && !message.id.startsWith('error-') && <button className="copy-button" type="button" onClick={() => copyMessage(message)} aria-label="نسخ الرد"><CopyIcon /><span>{copiedId === message.id ? 'تم النسخ' : 'نس��'}</span></button>}</div></article>)}
             {isLoading && <article className="message message-assistant" aria-label="المساعد يكتب"><BrandMark small /><div className="message-body"><div className="message-author">ذكاء بلس</div><div className="typing-indicator"><i /><i /><i /></div></div></article>}
             <div ref={bottomRef} />
           </div>}
