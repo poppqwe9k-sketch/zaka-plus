@@ -50,6 +50,18 @@ body,
   overscroll-behavior: contain;
 }
 
+/* Use the repository logo in every existing brand mark in the chat UI. */
+.brand-mark {
+  color: transparent;
+  font-size: 0 !important;
+  background-color: #fff;
+  background-image: url('/logo.svg');
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: contain;
+  border: 1px solid #ededed;
+}
+
 button:focus-visible,
 textarea:focus-visible {
   outline: 2px solid #555;
