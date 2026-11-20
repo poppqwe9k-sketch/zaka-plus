@@ -16,11 +16,13 @@ export default {
       if (request.method !== 'POST') {
         return json({ error: 'طريقة الطلب غير مدعومة.' }, 405);
       }
-      return onRequestPost({ request, env });
+      try {
+        return await onRequestPost({ request, env });
+      } catch {
+        return json({ error: 'تعذر إكمال طلب المحادثة بسبب خطأ داخلي في Worker. أعد المحاولة أو راجع سجلات Worker.' }, 502);
+      }
     }
 
-    // Wrangler serves files from dist through the static-assets binding.
-    // SPA fallback is configured in wrangler.jsonc.
     return env.ASSETS.fetch(request);
   }
 };

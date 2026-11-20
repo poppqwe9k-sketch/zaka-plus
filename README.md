@@ -1,17 +1,16 @@
 # ذكاء بلس | Zaka+
 
-واجهة دردشة عربية RTL مبنية بـ React وVite، ينشرها Cloudflare Worker مع أصول Vite من `dist/` ومسار خادمي آمن لـ Gemini على `/api/chat`.
+واجهة دردشة عربية RTL مبنية بـ React وVite. ينشرها Cloudflare Worker مع أصول Vite من `dist/` ومسار خادمي آمن لـ Gemini على `/api/chat`.
 
-## التعامل مع HTTP 503 من Gemini
+## تشخيص HTTP 500 وإعادة المحاولة
 
-عند فشل النموذج الأساسي (المحدد عبر `GEMINI_MODEL`، أو الافتراضي `gemini-3.8-flash`) باستجابة HTTP 503، يعيد Worker المحاولة مرة واحدة بانتظار قصير بتأخير أسي مع jitter. إذا استمر 503، يجرب النموذج الاحتياطي المحدد عبر `GEMINI_FALLBACK_MODEL`؛ الافتراضي `gemini-3.5-flash-lite`. عند نجاح البديل يُعاد الرد مع `fallbackUsed: true`. لا ينتقل إلى بديل عند أخطاء المفتاح أو الصلاحيات أو الطلب (مثل 401/403/400)، لتجنب إخفاء الإعداد الخاطئ.
+مسار `/api/chat` يقرأ `GEMINI_API_KEY` من Worker Secret، ويستخدم `GEMINI_MODEL` أو النموذج الافتراضي `gemini-3.8-flash`. عند HTTP 503 من النموذج الأساسي، يجري محاولة ثانية قصيرة ثم ينتقل إلى `GEMINI_FALLBACK_MODEL` (الافتراضي `gemini-3.5-flash-lite`). تعاد أخطاء Gemini برسالة واضحة، وأي استثناء غير متوقع في المعالج يتحول إلى JSON برسالة عربية وHTTP 502 بدلاً من خطأ Worker مبهم 500.
 
-يمكن تغيير النموذجين كمتغيرات Runtime في Worker:
+## إعداد Cloudflare
 
-- `GEMINI_MODEL`: الأساسي، افتراضياً `gemini-3.8-flash`.
-- `GEMINI_FALLBACK_MODEL`: البديل، افتراضياً `gemini-3.5-flash-lite`.
-- `GEMINI_API_BASE_URL`: افتراضياً `https://generativelanguage.googleapis.com/v1beta`.
-- `GEMINI_API_KEY`: Secret؛ لا تضعه في متغير `VITE_*` أو ملفات المتصفح.
+- خزّن `GEMINI_API_KEY` كـ Worker Secret.
+- اضبط اختيارياً `GEMINI_MODEL` و`GEMINI_FALLBACK_MODEL` و`GEMINI_API_BASE_URL` كـ runtime variables.
+- لا تستخدم متغيرات `VITE_*` للمفتاح لأنها تكشفه في ملفات المتصفح.
 
 ## البناء والنشر
 
@@ -21,4 +20,4 @@ npm run build
 npx wrangler deploy
 ```
 
-أمر `npm run build` ينشئ أصول Vite في `dist/`. يقدّم Worker هذه الأصول ويعالج `/api/chat` خادمياً. تأكد أن النشر على Cloudflare Workers يتضمن Worker وملفات `dist/`، وأن الأسرار والمتغيرات موجودة في البيئة المنشورة.
+ينشئ Vite الأصول في `dist/` ويقدمها Worker، بينما يعالج Worker طلبات `/api/chat` من جانب الخادم.
