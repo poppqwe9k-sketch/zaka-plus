@@ -6,17 +6,25 @@ const initialMessage = {
   content: 'أهلاً بك في ذكاء بلس | Zaka+، مساعدك الذكي. كيف يمكنني مساعدتك اليوم؟'
 };
 
+const models = [
+  { id: 'gemini', label: 'Gemini 2.5 Flash' },
+  { id: 'qwen', label: 'Qwen 2.5 72B' },
+  { id: 'deepseek', label: 'DeepSeek R1' },
+  { id: 'llama', label: 'Llama 3.3 70B (سريع وذكي)' }
+];
+
 const suggestions = [
   { title: 'اكتب لي رسالة', detail: 'صياغة رسالة واضحة ومناسبة' },
   { title: 'اشرح لي موضوعاً', detail: 'شرح مبسّط خطوة بخطوة' },
   { title: 'ساعدني في فكرة', detail: 'عصف ذهني واقتراحات جديدة' }
 ];
 
-async function getAssistantReply(conversation) {
+async function getAssistantReply(conversation, model) {
   const response = await fetch('/api/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
+      model,
       messages: conversation
         .filter((message) => message.id !== 'welcome' && !message.id.startsWith('error-'))
         .map(({ role, content }) => ({ role, content }))
@@ -24,11 +32,9 @@ async function getAssistantReply(conversation) {
   });
 
   const result = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(result.error || `تعذر الاتصال بالمساعد (HTTP ${response.status}).`);
-  }
+  if (!response.ok) throw new Error(result.error || `تعذر الاتصال بالمساعد (HTTP ${response.status}).`);
   if (typeof result.reply !== 'string' || !result.reply.trim()) {
-    throw new Error('لم يصل رد نصي من Gemini. حاول مرة أخرى.');
+    throw new Error('لم يصل رد نصي من النموذج المختار. حاول مرة أخرى.');
   }
   return result.reply;
 }
@@ -71,12 +77,14 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [copiedId, setCopiedId] = useState(null);
+  const [selectedModel, setSelectedModel] = useState('gemini');
   const textareaRef = useRef(null);
   const bottomRef = useRef(null);
   const requestIdRef = useRef(0);
 
   const messages = messagesByChat[activeChatId] || [initialMessage];
   const isEmptyChat = messages.length === 1 && messages[0].id === 'welcome';
+  const selectedModelLabel = models.find((model) => model.id === selectedModel)?.label || models[0].label;
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
@@ -113,11 +121,8 @@ export default function App() {
     if (!text || isLoading) return;
 
     const chatId = activeChatId;
-    const userMessage = {
-      id: `user-${Date.now()}`,
-      role: 'user',
-      content: text
-    };
+    const model = selectedModel;
+    const userMessage = { id: `user-${Date.now()}`, role: 'user', content: text };
     const updatedMessages = [...messages, userMessage];
     const requestId = ++requestIdRef.current;
 
@@ -132,27 +137,21 @@ export default function App() {
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
 
     try {
-      const answer = await getAssistantReply(updatedMessages);
+      const answer = await getAssistantReply(updatedMessages, model);
       if (requestId !== requestIdRef.current) return;
       setMessagesByChat((current) => ({
         ...current,
-        [chatId]: [
-          ...(current[chatId] || updatedMessages),
-          { id: `assistant-${Date.now()}`, role: 'assistant', content: answer }
-        ]
+        [chatId]: [...(current[chatId] || updatedMessages), { id: `assistant-${Date.now()}`, role: 'assistant', content: answer }]
       }));
     } catch (error) {
       if (requestId !== requestIdRef.current) return;
       setMessagesByChat((current) => ({
         ...current,
-        [chatId]: [
-          ...(current[chatId] || updatedMessages),
-          {
-            id: `error-${Date.now()}`,
-            role: 'assistant',
-            content: error?.message || 'تعذر الاتصال بالمساعد. حاول مرة أخرى.'
-          }
-        ]
+        [chatId]: [...(current[chatId] || updatedMessages), {
+          id: `error-${Date.now()}`,
+          role: 'assistant',
+          content: error?.message || 'تعذر الاتصال بالمساعد. حاول مرة أخرى.'
+        }]
       }));
     } finally {
       if (requestId === requestIdRef.current) setIsLoading(false);
@@ -214,8 +213,8 @@ export default function App() {
         <div className="sidebar-footer">
           <BrandMark small />
           <div>
-            <div className="footer-title">Zaka+ مع Gemini</div>
-            <div className="footer-caption">محادثة ذكية باللغة العربية</div>
+            <div className="footer-title">Zaka+ للذكاء الاصطناعي</div>
+            <div className="footer-caption">اختر النموذج المناسب لمحادثتك</div>
           </div>
         </div>
       </aside>
@@ -229,7 +228,15 @@ export default function App() {
           </button>
           <div className="model-selector">
             <span>ذكاء بلس</span>
-            <span className="model-version">Gemini</span>
+            <select
+              className="model-version"
+              aria-label="اختيار نموذج الذكاء الاصطناعي"
+              value={selectedModel}
+              onChange={(event) => setSelectedModel(event.target.value)}
+              disabled={isLoading}
+            >
+              {models.map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}
+            </select>
             <span className="chevron" aria-hidden="true">⌄</span>
           </div>
           <div className="topbar-spacer" />
@@ -311,7 +318,7 @@ export default function App() {
               <SendIcon />
             </button>
           </form>
-          <p className="disclaimer">قد ينتج Gemini إجابات غير دقيقة؛ تحقّق من المعلومات المهمة.</p>
+          <p className="disclaimer">قد ينتج {selectedModelLabel} إجابات غير دقيقة؛ تحقّق من المعلومات المهمة.</p>
         </div>
       </main>
     </div>
