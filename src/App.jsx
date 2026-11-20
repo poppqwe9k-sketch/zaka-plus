@@ -18,7 +18,7 @@ const geminiModels = [
   'gemini-3.5-flash',
   'gemini-3.5-flash-lite'
 ];
-const MAX_REQUEST_MESSAGES = 10;
+const MAX_REQUEST_MESSAGES = 6;
 const CLIENT_TIMEOUT_MS = 100000;
 
 const suggestions = [
@@ -89,7 +89,6 @@ export default function App() {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, [messages, isLoading]);
-
   useEffect(() => {
     if (copiedId === null) return undefined;
     const timer = window.setTimeout(() => setCopiedId(null), 1400);

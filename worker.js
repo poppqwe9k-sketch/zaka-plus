@@ -6,7 +6,7 @@ const DEFAULT_GEMINI_POOL = [
   'gemini-3.5-flash-lite'
 ];
 const GEMINI_API_VERSION = 'v1beta';
-const MAX_HISTORY_MESSAGES = 10;
+const MAX_HISTORY_MESSAGES = 6;
 const MAX_MESSAGE_LENGTH = 12000;
 const REQUEST_TIMEOUT_MS = 15000;
 const WORKERS_AI_TIMEOUT_MS = 15000;
@@ -67,10 +67,6 @@ function extractGeminiText(data) {
   return Array.isArray(parts)
     ? parts.map((part) => typeof part?.text === 'string' ? part.text : '').join('').trim()
     : '';
-}
-
-function sleep(milliseconds) {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 async function callGemini({ apiKey, model, contents, systemInstruction, maxOutputTokens }) {
@@ -145,19 +141,10 @@ async function runAcrossGeminiModels(options) {
   let lastResult = null;
 
   for (let index = 0; index < models.length; index += 1) {
-    const model = models[index];
-    const attempts = index === 0 ? 2 : 1;
-    for (let attempt = 1; attempt <= attempts; attempt += 1) {
-      const result = await callGemini({ ...options, model });
-      if (result.ok) return { ...result, switchedFromPrimary: index > 0 };
-      lastResult = result;
-      if ([400, 401, 403].includes(result.status)) return result;
-      if ([503, 504].includes(result.status) && attempt < attempts) {
-        await sleep(350);
-        continue;
-      }
-      break;
-    }
+    const result = await callGemini({ ...options, model: models[index] });
+    if (result.ok) return { ...result, switchedFromPrimary: index > 0 };
+    lastResult = result;
+    if ([400, 401, 403].includes(result.status)) return result;
   }
 
   return lastResult || {
