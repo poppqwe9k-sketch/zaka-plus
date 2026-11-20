@@ -1,6 +1,7 @@
 # Build dependencies
 node_modules/
 dist/
+.wrangler/
 
 # Local environment and debug logs
 .env

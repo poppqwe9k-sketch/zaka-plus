@@ -1,33 +1,35 @@
 # ذكاء بلس | Zaka+
 
-واجهة دردشة عربية RTL مبنية باستخدام React وVite كتطبيق ويب ثابت (SPA)، مع Cloudflare Pages Function وسيطة للاتصال بـ Google Gemini.
+واجهة دردشة عربية RTL مبنية بـ React وVite. ينشرها Cloudflare Worker مع خدمة الملفات الثابتة من `dist/` ومسار خادمي آمن لـ Gemini على `/api/chat`.
 
-## التشغيل والبناء
+## البناء والنشر
 
 ```bash
 npm install
-npm run dev
 npm run build
-npm run preview
 ```
 
-أمر البناء ينشئ أصول الموقع الثابت داخل `dist/` ولا يشغّل Wrangler أو أي خطوة نشر.
+ينشئ Vite الملفات الثابتة داخل `dist/`. للنشر من بيئة محلية مصادق عليها مع Cloudflare، استخدم `npm run deploy`؛ ينفّذ البناء أولاً ثم `wrangler deploy`. لا يوضع مفتاح Gemini في bundle المتصفح.
 
-## إعداد Gemini على Cloudflare Pages
+## إعداد Cloudflare
 
-1. أنشئ مفتاحاً من Google AI Studio.
-2. في إعدادات مشروع Cloudflare Pages، أضف `GEMINI_API_KEY` كـ **Secret** (وليس كمتغير `VITE_*` ولا في ملفات Git).
-3. أضف اختيارياً `GEMINI_MODEL` كمتغير نصي؛ القيمة الافتراضية `gemini-2.5-flash` ويمكن تغييرها إلى نموذج متاح لحسابك.
-4. أضف اختيارياً `GEMINI_API_BASE_URL`؛ الافتراضي `https://generativelanguage.googleapis.com/v1beta`.
-5. أعد النشر بعد ضبط المتغيرات. Pages Functions تُنشر مع الموقع وتوفّر المسار `/api/chat`.
-
-لا تضع مفتاح API ضمن `VITE_GEMINI_API_KEY`: أي متغير `VITE_*` يُضمّن في ملفات المتصفح ويصبح مرئياً لزوار الموقع. المفتاح يُقرأ داخل الدالة الخادمية فقط.
-
-للتطوير المحلي عبر Cloudflare Pages، انسخ `.dev.vars.example` إلى `.dev.vars` وضع المفتاح في الملف المحلي غير المرفوع إلى Git. استخدم `wrangler pages dev dist` لتجربة Function محلياً بعد بناء التطبيق.
-
-## إعداد Cloudflare Pages
-
-- Root directory: `/`
+- اربط المستودع بمشروع **Cloudflare Workers Builds** (وليس نشر أصول ثابتة فقط).
 - Build command: `npm run build`
-- Build output directory: `dist`
+- Deploy command: `npx wrangler deploy`
+- Root directory: `/`
+- أضف `GEMINI_API_KEY` كـ Worker Secret في إعدادات بيئة الإنتاج. لا تستخدم `VITE_GEMINI_API_KEY`.
+- يمكن تعيين `GEMINI_MODEL` كمتغير عادي؛ القيمة الافتراضية `gemini-2.5-flash`.
+- يمكن تعيين `GEMINI_API_BASE_URL` اختيارياً؛ الافتراضي `https://generativelanguage.googleapis.com/v1beta`.
 
+`wrangler.jsonc` يربط `dist/` كأصول ثابتة، ويضبط fallback لتطبيق SPA. Worker يعالج `/api/chat` قبل تمرير بقية الطلبات إلى binding الأصول `ASSETS`. ملف `public/_redirects` لا يحتوي على قواعد تحويل فعلية، لتجنب تعارض أو حلقات إعادة التوجيه.
+
+## تطوير محلي
+
+انسخ `.dev.vars.example` إلى `.dev.vars`، وضع مفتاحك الحقيقي محلياً، ثم:
+
+```bash
+npm run build
+npx wrangler dev
+```
+
+لا ترفع `.dev.vars` أو أي مفتاح حقيقي إلى GitHub.
