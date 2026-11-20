@@ -12,21 +12,22 @@ const suggestions = [
   { title: 'ساعدني في فكرة', detail: 'عصف ذهني واقتراحات جديدة' }
 ];
 
-/**
- * نقطة توصيل المساعد. استبدل الرد التجريبي هنا بطلب إلى خادمك عند تجهيز API.
- * لا تضع مفتاح API سرياً في تطبيق المتصفح؛ مرّر الطلب عبر خادم آمن.
- */
-async function getAssistantReply(message, conversation) {
-  // مثال مستقبلي:
-  // const response = await fetch('/api/chat', {
-  //   method: 'POST',
-  //   headers: { 'Content-Type': 'application/json' },
-  //   body: JSON.stringify({ message, conversation })
-  // });
-  // if (!response.ok) throw new Error('تعذر الحصول على رد');
-  // return (await response.json()).reply;
-  await new Promise((resolve) => setTimeout(resolve, 650));
-  return `وصلني سؤالك: «${message}»\n\nهذه إجابة تجريبية حالياً. عند ربط واجهة API، سيظهر رد المساعد هنا.`;
+/** Calls the same-origin Cloudflare Pages Function; no API key is exposed in the browser bundle. */
+async function getAssistantReply(conversation) {
+  const response = await fetch('/api/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ messages: conversation })
+  });
+
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(result.error || 'تعذر الاتصال بالمساعد. حاول مرة أخرى لاحقاً.');
+  }
+  if (typeof result.reply !== 'string' || !result.reply.trim()) {
+    throw new Error('لم يصل رد نصي من المساعد. حاول مرة أخرى.');
+  }
+  return result.reply;
 }
 
 function BrandMark({ small = false }) {
@@ -65,6 +66,7 @@ export default function App() {
   const [messagesByChat, setMessagesByChat] = useState({ 'chat-1': [initialMessage] });
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [copiedId, setCopiedId] = useState(null);
   const textareaRef = useRef(null);
@@ -90,6 +92,7 @@ export default function App() {
     setMessagesByChat((current) => ({ ...current, [id]: [initialMessage] }));
     setActiveChatId(id);
     setInput('');
+    setErrorMessage('');
     setIsLoading(false);
     setSidebarOpen(false);
     requestIdRef.current += 1;
@@ -98,6 +101,7 @@ export default function App() {
   function selectChat(id) {
     setActiveChatId(id);
     setInput('');
+    setErrorMessage('');
     setSidebarOpen(false);
     setIsLoading(false);
     requestIdRef.current += 1;
@@ -124,11 +128,16 @@ export default function App() {
         : chat
     )));
     setInput('');
+    setErrorMessage('');
     setIsLoading(true);
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
 
     try {
-      const answer = await getAssistantReply(text, updatedMessages);
+      // Send conversation history, excluding the welcome message and UI-only errors.
+      const history = updatedMessages
+        .filter((message) => message.id !== 'welcome' && ['user', 'assistant'].includes(message.role))
+        .map(({ role, content }) => ({ role, content }));
+      const answer = await getAssistantReply(history);
       if (requestId !== requestIdRef.current) return;
       setMessagesByChat((current) => ({
         ...current,
@@ -139,17 +148,7 @@ export default function App() {
       }));
     } catch (error) {
       if (requestId !== requestIdRef.current) return;
-      setMessagesByChat((current) => ({
-        ...current,
-        [chatId]: [
-          ...(current[chatId] || updatedMessages),
-          {
-            id: `error-${Date.now()}`,
-            role: 'assistant',
-            content: error?.message || 'حدث خطأ. حاول مرة أخرى.'
-          }
-        ]
-      }));
+      setErrorMessage(error?.message || 'تعذر الاتصال بالمساعد. تحقق من الإعدادات ثم حاول مجدداً.');
     } finally {
       if (requestId === requestIdRef.current) setIsLoading(false);
     }
@@ -157,6 +156,7 @@ export default function App() {
 
   function handleInputChange(event) {
     setInput(event.target.value);
+    setErrorMessage('');
     event.target.style.height = 'auto';
     event.target.style.height = `${Math.min(event.target.scrollHeight, 180)}px`;
   }
@@ -166,7 +166,7 @@ export default function App() {
       await navigator.clipboard.writeText(message.content);
       setCopiedId(message.id);
     } catch {
-      setCopiedId(null);
+      setErrorMessage('تعذر نسخ الرد. تحقق من صلاحية الحافظة في المتصفح.');
     }
   }
 
@@ -210,8 +210,8 @@ export default function App() {
         <div className="sidebar-footer">
           <BrandMark small />
           <div>
-            <div className="footer-title">Zaka+ التجريبي</div>
-            <div className="footer-caption">واجهة جاهزة لربط API</div>
+            <div className="footer-title">Zaka+ مع Gemini</div>
+            <div className="footer-caption">محادثة ذكية باللغة العربية</div>
           </div>
         </div>
       </aside>
@@ -225,14 +225,14 @@ export default function App() {
           </button>
           <div className="model-selector">
             <span>ذكاء بلس</span>
-            <span className="model-version">نسخة تجريبية</span>
+            <span className="model-version">Gemini</span>
             <span className="chevron" aria-hidden="true">⌄</span>
           </div>
           <div className="topbar-spacer" />
           <span className="topbar-status"><span className="status-dot" /> جاهز</span>
         </header>
 
-        <section className={`conversation${isEmptyChat ? ' conversation-empty' : ''}`} aria-label="المحادثة">
+        <section className={`conversation${isEmptyChat ? ' conversation-empty' : ''}`} aria-label="المحادثة" aria-live="polite">
           {isEmptyChat ? (
             <div className="welcome-panel">
               <div className="welcome-mark"><BrandMark /></div>
@@ -287,6 +287,7 @@ export default function App() {
         </section>
 
         <div className="composer-area">
+          {errorMessage && <p className="error-message" role="alert">{errorMessage}</p>}
           <form className="composer" onSubmit={handleSend}>
             <textarea
               ref={textareaRef}
@@ -307,7 +308,7 @@ export default function App() {
               <SendIcon />
             </button>
           </form>
-          <p className="disclaimer">ذكاء بلس قد يخطئ أحياناً. تحقّق من المعلومات المهمة.</p>
+          <p className="disclaimer">قد ينتج Gemini إجابات غير دقيقة؛ تحقّق من المعلومات المهمة.</p>
         </div>
       </main>
     </div>
