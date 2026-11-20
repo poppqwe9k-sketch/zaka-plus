@@ -7,7 +7,7 @@ const CORS_HEADERS = {
 };
 
 const MODELS = {
-  gemini: { provider: 'google', id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
+  gemini: { provider: 'google', id: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash' },
   qwen: { provider: 'cloudflare', id: '@cf/qwen/qwen2.5-72b-instruct', label: 'Qwen 2.5 72B' },
   deepseek: { provider: 'cloudflare', id: '@cf/deepseek-ai/deepseek-r1-distill-qwen-32b', label: 'DeepSeek R1 Distill Qwen 32B' },
   llama: { provider: 'cloudflare', id: '@cf/meta/llama-3.3-70b-instruct-fp8-fast', label: 'Llama 3.3 70B (سريع وذكي)' }
@@ -40,14 +40,14 @@ async function callGemini(messages, apiKey) {
   }
   if (contents[0]?.role !== 'user') throw new Error('يجب أن تبدأ المحادثة برسالة من المستخدم.');
 
-  const endpoint = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
+  const endpoint = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent';
   const response = await fetch(endpoint, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
     body: JSON.stringify({ contents })
   });
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data?.error?.message || `تعذر الاتصال بـ Gemini (HTTP ${response.status}).`);
+  if (!response.ok) throw new Error(data?.error?.message || `تعذر الاتصال ��ـ Gemini (HTTP ${response.status}).`);
   return data?.candidates?.[0]?.content?.parts?.map((part) => part.text || '').join('').trim() || '';
 }
 
