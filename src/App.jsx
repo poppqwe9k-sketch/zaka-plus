@@ -7,19 +7,13 @@ const initialMessage = {
 };
 
 const models = [
-  { id: 'gemini', label: 'Gemini 3.8 Flash' },
-  { id: 'deepseek-v4-flash', label: 'DeepSeek-V4.1-Flash' },
-  { id: 'claude-sonnet-5-5', label: 'Claude Sonnet 5.5' },
-  { id: 'llama', label: 'Llama 3.3 70B (سريع وذكي)' }
-];
-const geminiModels = [
-  'gemini-3.8-flash',
-  'gemini-3.8-flash-lite',
-  'gemini-3.5-flash',
-  'gemini-3.5-flash-lite'
+  { id: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash' },
+  { id: 'gemini-3.8-flash-lite', label: 'Gemini 3.8 Flash Lite' },
+  { id: 'gemini-3.5-flash', label: 'Gemini 3.5 Flash' },
+  { id: 'gemini-3.5-flash-lite', label: 'Gemini 3.5 Flash Lite' }
 ];
 const MAX_REQUEST_MESSAGES = 6;
-const CLIENT_TIMEOUT_MS = 100000;
+const CLIENT_TIMEOUT_MS = 50000;
 
 const suggestions = [
   { title: 'اكتب لي رسالة', detail: 'صياغة رسالة واضحة ومناسبة' },
@@ -39,11 +33,7 @@ async function getAssistantReply(conversation, selectedModel) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       signal: controller.signal,
-      body: JSON.stringify({
-        model: selectedModel === 'gemini' ? geminiModels[0] : selectedModel,
-        models: geminiModels,
-        messages
-      })
+      body: JSON.stringify({ model: selectedModel, messages })
     });
     const result = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(result.error || `تعذر الاتصال بالمساعد (HTTP ${response.status}).`);
@@ -81,7 +71,7 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [copiedId, setCopiedId] = useState(null);
-  const [selectedModel, setSelectedModel] = useState('gemini');
+  const [selectedModel, setSelectedModel] = useState('gemini-3.8-flash');
   const textareaRef = useRef(null);
   const bottomRef = useRef(null);
   const requestIdRef = useRef(0);
@@ -190,7 +180,7 @@ export default function App() {
             </button>
           ))}
         </nav>
-        <div className="sidebar-footer"><BrandMark small /><div><div className="footer-title">Zaka+ للذكاء الاصطناعي</div><div className="footer-caption">اختر النموذج المناسب لمحادثتك</div></div></div>
+        <div className="sidebar-footer"><BrandMark small /><div><div className="footer-title">Zaka+ للذكاء الاصطناعي</div><div className="footer-caption">اختر نموذج Gemini المناسب</div></div></div>
       </aside>
 
       {sidebarOpen && <button className="sidebar-backdrop" type="button" aria-label="إغلاق القائمة" onClick={() => setSidebarOpen(false)} />}
