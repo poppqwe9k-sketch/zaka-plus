@@ -19,21 +19,33 @@ const suggestions = [
   { title: 'ساعدني في فكرة', detail: 'عصف ذهني واقتراحات جديدة' }
 ];
 
+const CLIENT_TIMEOUT_MS = 30000;
+
 async function getAssistantReply(conversation, model) {
-  const response = await fetch('/api/chat', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model,
-      messages: conversation
-        .filter((message) => message.id !== 'welcome' && !message.id.startsWith('error-'))
-        .map(({ role, content }) => ({ role, content }))
-    })
-  });
-  const result = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(result.error || `تعذر الاتصال بالمساعد (HTTP ${response.status}).`);
-  if (typeof result.reply !== 'string' || !result.reply.trim()) throw new Error('لم يصل رد نصي من النموذج المختار. حاول مرة أخرى.');
-  return result.reply;
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), CLIENT_TIMEOUT_MS);
+  try {
+    const response = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model,
+        messages: conversation
+          .filter((message) => message.id !== 'welcome' && !message.id.startsWith('error-'))
+          .map(({ role, content }) => ({ role, content }))
+      })
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || `تعذر الاتصال بالمساعد (HTTP ${response.status}).`);
+    if (typeof result.reply !== 'string' || !result.reply.trim()) throw new Error('لم يصل رد نصي من النموذج المختار. حاول مرة أخرى.');
+    return result.reply;
+  } catch (error) {
+    if (error?.name === 'AbortError') throw new Error('استغرق الطلب وقتاً أطول من المتوقع (30 ثانية). تحقق من الاتصال ثم أعد المحاولة.');
+    throw error;
+  } finally {
+    window.clearTimeout(timeout);
+  }
 }
 
 function BrandMark({ small = false }) {
@@ -103,11 +115,13 @@ export default function App() {
     const userMessage = { id: `user-${Date.now()}`, role: 'user', content: text };
     const updatedMessages = [...messages, userMessage];
     const requestId = ++requestIdRef.current;
+
     setMessagesByChat((current) => ({ ...current, [chatId]: updatedMessages }));
     setChats((current) => current.map((chat) => chat.id === chatId && chat.title === 'محادثة جديدة' ? { ...chat, title: text.length > 34 ? `${text.slice(0, 34)}…` : text } : chat));
     setInput('');
     setIsLoading(true);
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
+
     try {
       const answer = await getAssistantReply(updatedMessages, model);
       if (requestId !== requestIdRef.current) return;

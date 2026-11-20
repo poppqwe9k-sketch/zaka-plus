@@ -13,6 +13,8 @@ const MODELS = {
   llama: { provider: 'cloudflare', id: '@cf/meta/llama-3.3-70b-instruct-fp8-fast', label: 'Llama 3.3 70B (سريع وذكي)' }
 };
 const GEMINI_FALLBACK_MODEL = 'gemini-3.8-flash-lite';
+const GEMINI_TIMEOUT_MS = 8500;
+const WORKERS_AI_TIMEOUT_MS = 8500;
 const MAX_MESSAGES = 50;
 const MAX_MESSAGE_LENGTH = 12000;
 
@@ -44,38 +46,56 @@ function toGeminiContents(messages) {
 async function callGemini(messages, apiKey, modelId) {
   if (!apiKey) return { ok: false, status: 503, error: 'خدمة Gemini غير مهيأة حالياً.' };
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelId)}:generateContent`;
-  let response;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), GEMINI_TIMEOUT_MS);
+
   try {
-    response = await fetch(url, {
+    const response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
-      body: JSON.stringify({ contents: toGeminiContents(messages), generationConfig: { temperature: 0.7 } })
+      body: JSON.stringify({ contents: toGeminiContents(messages), generationConfig: { temperature: 0.7 } }),
+      signal: controller.signal
     });
-  } catch {
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      return { ok: false, status: response.status, error: data?.error?.message || `تعذر الاتصال بخدمة Gemini (HTTP ${response.status}).` };
+    }
+    const reply = data?.candidates?.[0]?.content?.parts?.map((part) => typeof part.text === 'string' ? part.text : '').join('').trim();
+    return reply
+      ? { ok: true, reply, model: modelId }
+      : { ok: false, status: 502, error: 'لم يُرجع Gemini نصاً صالحاً.' };
+  } catch (error) {
+    if (error?.name === 'AbortError') {
+      return { ok: false, status: 408, error: 'انتهت مهلة الاتصال بـ Gemini بعد 8.5 ثوانٍ.' };
+    }
     return { ok: false, status: 0, error: 'تعذر الاتصال بخدمة Gemini.' };
+  } finally {
+    clearTimeout(timeout);
   }
-
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    return { ok: false, status: response.status, error: data?.error?.message || `تعذر الاتصال بخدمة Gemini (HTTP ${response.status}).` };
-  }
-  const reply = data?.candidates?.[0]?.content?.parts?.map((part) => typeof part.text === 'string' ? part.text : '').join('').trim();
-  return reply
-    ? { ok: true, reply, model: modelId }
-    : { ok: false, status: 502, error: 'لم يُرجع Gemini نصاً صالحاً.' };
 }
 
 async function callWorkersAI(env, model, messages) {
   const binding = env?.MY_BINDING || env?.AI;
   if (!binding || typeof binding.run !== 'function') return null;
-  const result = await binding.run(model.id, {
-    messages: [
-      { role: 'system', content: 'أنت مساعد ذكي مفيد يتحدث العربية بطلاقة ووضوح.' },
-      ...messages.map(({ role, content }) => ({ role: role === 'assistant' ? 'assistant' : 'user', content }))
-    ]
-  });
-  const reply = normalizeReply(result);
-  return reply ? { reply, model: model.id } : null;
+
+  let timeoutId;
+  try {
+    const result = await Promise.race([
+      binding.run(model.id, {
+        messages: [
+          { role: 'system', content: 'أنت مساعد ذكي مفيد يتحدث العربية بطلاقة ووضوح.' },
+          ...messages.map(({ role, content }) => ({ role: role === 'assistant' ? 'assistant' : 'user', content }))
+        ]
+      }),
+      new Promise((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error('انتهت مهلة نموذج Workers AI.')), WORKERS_AI_TIMEOUT_MS);
+      })
+    ]);
+    const reply = normalizeReply(result);
+    return reply ? { reply, model: model.id } : null;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 async function answerWithGemini(env, messages) {
@@ -84,18 +104,20 @@ async function answerWithGemini(env, messages) {
   if (primary.ok) return json({ reply: primary.reply, model: 'gemini' });
 
   let geminiResult = primary;
-  if (primary.status === 503 || primary.status === 404) {
+  // No backoff/retry loop: go straight to the lightweight Gemini fallback for
+  // busy, missing, timed-out, or unreachable primary model responses.
+  if ([0, 404, 408, 429, 503].includes(primary.status)) {
     geminiResult = await callGemini(messages, apiKey, GEMINI_FALLBACK_MODEL);
     if (geminiResult.ok) return json({ reply: geminiResult.reply, model: 'gemini', fallbackUsed: true });
   }
 
-  // Workers AI is an optional last-resort fallback. Missing binding must not
-  // replace the useful Gemini error with an internal binding-name message.
+  // Workers AI is optional. If MY_BINDING is absent, keep the clear Gemini
+  // error rather than exposing a binding configuration exception.
   try {
     const fallback = await callWorkersAI(env, MODELS.llama, messages);
     if (fallback) return json({ reply: fallback.reply, model: 'llama', fallbackUsed: true });
   } catch {
-    // Return the Gemini provider error below if the optional fallback is unavailable.
+    // Fall through to the Gemini error response.
   }
   return json({ error: geminiResult.error || 'تعذر إكمال الطلب إلى Gemini.' }, 502);
 }
@@ -112,12 +134,12 @@ async function handleChat(request, env) {
   const model = MODELS[modelKey];
   if (!model) return json({ error: 'النموذج المختار غير مدعوم.' }, 400);
 
-  const messages = payload?.messages;
-  if (!Array.isArray(messages) || messages.length === 0 || messages.length > MAX_MESSAGES) {
+  const incomingMessages = payload?.messages;
+  if (!Array.isArray(incomingMessages) || incomingMessages.length === 0 || incomingMessages.length > MAX_MESSAGES) {
     return json({ error: 'سجل المحادثة غير صالح أو طويل جداً.' }, 400);
   }
-  const cleanMessages = [];
-  for (const message of messages) {
+  const messages = [];
+  for (const message of incomingMessages) {
     if (!message || !['user', 'assistant'].includes(message.role) || typeof message.content !== 'string') {
       return json({ error: 'صيغة إحدى رسائل المحادثة غير صالحة.' }, 400);
     }
@@ -125,18 +147,17 @@ async function handleChat(request, env) {
     if (!content || content.length > MAX_MESSAGE_LENGTH) {
       return json({ error: 'إحدى الرسائل فارغة أو تتجاوز الحد المسموح.' }, 400);
     }
-    cleanMessages.push({ role: message.role, content });
+    messages.push({ role: message.role, content });
   }
-  if (cleanMessages[0].role !== 'user') return json({ error: 'ابدأ المحادثة برسالة من المستخدم.' }, 400);
+  if (messages[0].role !== 'user') return json({ error: 'ابدأ المحادثة برسالة من المستخدم.' }, 400);
 
-  if (modelKey === 'gemini') return answerWithGemini(env, cleanMessages);
-
+  if (modelKey === 'gemini') return answerWithGemini(env, messages);
   try {
-    const result = await callWorkersAI(env, model, cleanMessages);
+    const result = await callWorkersAI(env, model, messages);
     if (!result) return json({ error: 'النموذج المحدد غير متاح حالياً.' }, 503);
     return json({ reply: result.reply, model: modelKey });
   } catch {
-    return json({ error: 'تعذر إكمال الطلب إلى النموذج المحدد. حاول مرة أخرى.' }, 502);
+    return json({ error: 'تعذر إكمال الطلب إلى النموذج المحدد أو انتهت مهلة الاتصال. حاول مرة أخرى.' }, 502);
   }
 }
 
