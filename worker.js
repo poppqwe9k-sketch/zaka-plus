@@ -17,7 +17,6 @@ const CORS_HEADERS = {
   'Access-Control-Max-Age': '86400',
   'Cache-Control': 'no-store'
 };
-
 const WORKERS_AI_MODELS = {
   qwen: '@cf/qwen/qwen2.5-72b-instruct',
   deepseek: '@cf/deepseek-ai/deepseek-r1-distill-qwen-32b',
@@ -34,17 +33,13 @@ function jsonResponse(payload, status = 200) {
 function normalizeModelName(value, fallback = '') {
   if (typeof value !== 'string' || !value.trim()) return fallback;
   const model = value.trim();
-  return model.startsWith('models/') ? model.slice('models/'.length) : model;
+  return model.startsWith('models/') ? model.slice(7) : model;
 }
 
 function extractMessages(body) {
   let input = Array.isArray(body?.messages) ? body.messages.slice(-MAX_HISTORY_MESSAGES) : [];
-  if (input.length === 0 && typeof body?.message === 'string') {
-    input = [{ role: 'user', content: body.message }];
-  }
-  if (input.length === 0 && typeof body?.prompt === 'string') {
-    input = [{ role: 'user', content: body.prompt }];
-  }
+  if (!input.length && typeof body?.message === 'string') input = [{ role: 'user', content: body.message }];
+  if (!input.length && typeof body?.prompt === 'string') input = [{ role: 'user', content: body.prompt }];
 
   const messages = [];
   for (const item of input) {
@@ -78,16 +73,6 @@ function sleep(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-async function fetchWithTimeout(url, options, timeoutMs = REQUEST_TIMEOUT_MS) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    return await fetch(url, { ...options, signal: controller.signal });
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
 async function callGemini({ apiKey, model, contents, systemInstruction, maxOutputTokens }) {
   const modelName = normalizeModelName(model, DEFAULT_GEMINI_MODEL);
   const endpoint = `https://generativelanguage.googleapis.com/${GEMINI_API_VERSION}/models/${encodeURIComponent(modelName)}:generateContent`;
@@ -95,42 +80,46 @@ async function callGemini({ apiKey, model, contents, systemInstruction, maxOutpu
   if (Number.isFinite(maxOutputTokens) && maxOutputTokens > 0) {
     generationConfig.maxOutputTokens = Math.min(maxOutputTokens, 8192);
   }
+
   const payload = { contents, generationConfig };
   if (typeof systemInstruction === 'string' && systemInstruction.trim()) {
     payload.systemInstruction = { parts: [{ text: systemInstruction.trim() }] };
   }
 
-  let response;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
-    response = await fetchWithTimeout(endpoint, {
+    const response = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
-      body: JSON.stringify(payload)
+      body: JSON.stringify(payload),
+      signal: controller.signal
     });
+    const data = await response.json().catch(() => null);
+    if (!response.ok) {
+      return {
+        ok: false,
+        status: response.status,
+        model: modelName,
+        error: data?.error?.message || response.statusText || `HTTP ${response.status}`
+      };
+    }
+
+    const reply = extractGeminiText(data);
+    return reply
+      ? { ok: true, status: 200, model: modelName, reply }
+      : { ok: false, status: 502, model: modelName, error: 'Gemini returned no usable text.' };
   } catch (error) {
     const timedOut = error?.name === 'AbortError';
     return {
       ok: false,
       status: timedOut ? 504 : 502,
       model: modelName,
-      error: timedOut ? 'Gemini did not respond before the request timeout.' : 'Unable to reach Gemini temporarily.'
+      error: timedOut ? 'Gemini request timed out.' : 'Unable to reach Gemini temporarily.'
     };
+  } finally {
+    clearTimeout(timer);
   }
-
-  const data = await response.json().catch(() => null);
-  if (!response.ok) {
-    return {
-      ok: false,
-      status: response.status,
-      model: modelName,
-      error: data?.error?.message || response.statusText || `HTTP ${response.status}`
-    };
-  }
-
-  const reply = extractGeminiText(data);
-  return reply
-    ? { ok: true, status: 200, model: modelName, reply }
-    : { ok: false, status: 502, model: modelName, error: 'Gemini returned no usable text.' };
 }
 
 function buildGeminiModelOrder(primaryModel, userModels, envModel) {
@@ -138,18 +127,17 @@ function buildGeminiModelOrder(primaryModel, userModels, envModel) {
   const ordered = [];
   const seen = new Set();
   const add = (value) => {
-    const name = normalizeModelName(value);
-    if (!name || !allowed.has(name) || seen.has(name)) return;
-    seen.add(name);
-    ordered.push(name);
+    const model = normalizeModelName(value);
+    if (!model || !allowed.has(model) || seen.has(model)) return;
+    seen.add(model);
+    ordered.push(model);
   };
 
   add(primaryModel);
   add(envModel);
   if (Array.isArray(userModels)) userModels.forEach(add);
   DEFAULT_GEMINI_POOL.forEach(add);
-  if (ordered.length === 0) ordered.push(DEFAULT_GEMINI_MODEL);
-  return ordered;
+  return ordered.length ? ordered : [DEFAULT_GEMINI_MODEL];
 }
 
 async function runAcrossGeminiModels(options) {
@@ -171,6 +159,7 @@ async function runAcrossGeminiModels(options) {
       break;
     }
   }
+
   return lastResult || {
     ok: false,
     status: 503,
@@ -182,9 +171,7 @@ async function runAcrossGeminiModels(options) {
 function normalizeWorkersReply(output) {
   const content = output?.response ?? output?.result?.response ?? output?.choices?.[0]?.message?.content;
   if (typeof content === 'string') return content.trim();
-  if (Array.isArray(content)) {
-    return content.map((part) => typeof part === 'string' ? part : part?.text || '').join('').trim();
-  }
+  if (Array.isArray(content)) return content.map((part) => typeof part === 'string' ? part : part?.text || '').join('').trim();
   return '';
 }
 
@@ -192,8 +179,8 @@ async function tryWorkersAI({ env, messages, systemInstruction, model }) {
   const binding = env?.MY_BINDING || env?.AI;
   if (!binding || typeof binding.run !== 'function') return null;
 
-  const modelId = model || (typeof env?.WORKERS_AI_MODEL === 'string' && env.WORKERS_AI_MODEL.trim()) || '@cf/meta/llama-3.3-70b-instruct-fp8-fast';
-  let timeoutId;
+  const modelId = model || (typeof env?.WORKERS_AI_MODEL === 'string' && env.WORKERS_AI_MODEL.trim()) || WORKERS_AI_MODELS.llama;
+  let timer;
   try {
     const output = await Promise.race([
       binding.run(modelId, {
@@ -203,13 +190,13 @@ async function tryWorkersAI({ env, messages, systemInstruction, model }) {
         ]
       }),
       new Promise((_, reject) => {
-        timeoutId = setTimeout(() => reject(new Error('Workers AI request timed out.')), WORKERS_AI_TIMEOUT_MS);
+        timer = setTimeout(() => reject(new Error('Workers AI request timed out.')), WORKERS_AI_TIMEOUT_MS);
       })
     ]);
     const reply = normalizeWorkersReply(output);
     return reply ? { ok: true, status: 200, model: modelId, reply, switchedFromPrimary: true } : null;
   } finally {
-    clearTimeout(timeoutId);
+    clearTimeout(timer);
   }
 }
 
@@ -225,7 +212,7 @@ async function handleChat(request, env) {
   }
 
   const messages = extractMessages(body);
-  if (messages.length === 0) return jsonResponse({ error: 'Please enter a message before sending.' }, 400);
+  if (!messages.length) return jsonResponse({ error: 'Please enter a message before sending.' }, 400);
   if (messages[0].role !== 'user') return jsonResponse({ error: 'The first message must be from the user.' }, 400);
 
   const systemInstruction = typeof body?.systemInstruction === 'string'
@@ -238,18 +225,16 @@ async function handleChat(request, env) {
   const maxOutputTokens = Number.isFinite(body?.maxOutputTokens) ? body.maxOutputTokens : undefined;
 
   try {
-    if (requestedModel in WORKERS_AI_MODELS) {
-      const result = await tryWorkersAI({
-        env, messages, systemInstruction, model: WORKERS_AI_MODELS[requestedModel]
-      });
+    if (Object.hasOwn(WORKERS_AI_MODELS, requestedModel)) {
+      const result = await tryWorkersAI({ env, messages, systemInstruction, model: WORKERS_AI_MODELS[requestedModel] });
       if (!result) return jsonResponse({ error: 'The selected Workers AI model is unavailable or not configured.' }, 503);
       return jsonResponse({ reply: result.reply, model: requestedModel, provider: 'workers-ai' });
     }
 
     if (!apiKey) {
-      const aiFallback = await tryWorkersAI({ env, messages, systemInstruction });
-      if (aiFallback?.ok) {
-        return jsonResponse({ reply: aiFallback.reply, model: aiFallback.model, provider: 'workers-ai', switchedFromPrimary: true });
+      const fallback = await tryWorkersAI({ env, messages, systemInstruction });
+      if (fallback?.ok) {
+        return jsonResponse({ reply: fallback.reply, model: fallback.model, provider: 'workers-ai', switchedFromPrimary: true });
       }
       return jsonResponse({ error: 'GEMINI_API_KEY is not configured in the Cloudflare Worker.' }, 503);
     }
@@ -272,9 +257,9 @@ async function handleChat(request, env) {
       });
     }
 
-    const aiFallback = await tryWorkersAI({ env, messages, systemInstruction });
-    if (aiFallback?.ok) {
-      return jsonResponse({ reply: aiFallback.reply, model: aiFallback.model, provider: 'workers-ai', switchedFromPrimary: true });
+    const fallback = await tryWorkersAI({ env, messages, systemInstruction });
+    if (fallback?.ok) {
+      return jsonResponse({ reply: fallback.reply, model: fallback.model, provider: 'workers-ai', switchedFromPrimary: true });
     }
 
     const status = result.status >= 400 && result.status < 600 ? result.status : 502;

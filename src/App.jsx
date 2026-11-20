@@ -19,7 +19,7 @@ const geminiModels = [
   'gemini-3.5-flash-lite'
 ];
 const MAX_REQUEST_MESSAGES = 10;
-const CLIENT_TIMEOUT_MS = 75000;
+const CLIENT_TIMEOUT_MS = 100000;
 
 const suggestions = [
   { title: 'اكتب لي رسالة', detail: 'صياغة رسالة واضحة ومناسبة' },
@@ -27,7 +27,7 @@ const suggestions = [
   { title: 'ساعدني في فكرة', detail: 'عصف ذهني واقتراحات جديدة' }
 ];
 
-async function getAssistantReply(conversation, model) {
+async function getAssistantReply(conversation, selectedModel) {
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), CLIENT_TIMEOUT_MS);
   try {
@@ -35,6 +35,7 @@ async function getAssistantReply(conversation, model) {
       .filter((message) => message.id !== 'welcome' && !message.id.startsWith('error-'))
       .slice(-MAX_REQUEST_MESSAGES)
       .map(({ role, content }) => ({ role, content }));
+    const model = selectedModel === 'gemini' ? geminiModels[0] : selectedModel;
     const response = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -85,7 +86,10 @@ export default function App() {
   const isEmptyChat = messages.length === 1 && messages[0].id === 'welcome';
   const selectedModelLabel = models.find((model) => model.id === selectedModel)?.label || models[0].label;
 
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }); }, [messages, isLoading]);
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }, [messages, isLoading]);
+
   useEffect(() => {
     if (copiedId === null) return undefined;
     const timer = window.setTimeout(() => setCopiedId(null), 1400);
@@ -115,6 +119,7 @@ export default function App() {
     event?.preventDefault();
     const text = input.trim();
     if (!text || isLoading) return;
+
     const chatId = activeChatId;
     const model = selectedModel;
     const userMessage = { id: `user-${Date.now()}`, role: 'user', content: text };
@@ -122,7 +127,11 @@ export default function App() {
     const requestId = ++requestIdRef.current;
 
     setMessagesByChat((current) => ({ ...current, [chatId]: updatedMessages }));
-    setChats((current) => current.map((chat) => chat.id === chatId && chat.title === 'محادثة جديدة' ? { ...chat, title: text.length > 34 ? `${text.slice(0, 34)}…` : text } : chat));
+    setChats((current) => current.map((chat) => (
+      chat.id === chatId && chat.title === 'محادثة جديدة'
+        ? { ...chat, title: text.length > 34 ? `${text.slice(0, 34)}…` : text }
+        : chat
+    )));
     setInput('');
     setIsLoading(true);
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
@@ -130,10 +139,20 @@ export default function App() {
     try {
       const answer = await getAssistantReply(updatedMessages, model);
       if (requestId !== requestIdRef.current) return;
-      setMessagesByChat((current) => ({ ...current, [chatId]: [...(current[chatId] || updatedMessages), { id: `assistant-${Date.now()}`, role: 'assistant', content: answer }] }));
+      setMessagesByChat((current) => ({
+        ...current,
+        [chatId]: [...(current[chatId] || updatedMessages), { id: `assistant-${Date.now()}`, role: 'assistant', content: answer }]
+      }));
     } catch (error) {
       if (requestId !== requestIdRef.current) return;
-      setMessagesByChat((current) => ({ ...current, [chatId]: [...(current[chatId] || updatedMessages), { id: `error-${Date.now()}`, role: 'assistant', content: error?.message || 'تعذر الاتصال بالمساعد. حاول مرة أخرى.' }] }));
+      setMessagesByChat((current) => ({
+        ...current,
+        [chatId]: [...(current[chatId] || updatedMessages), {
+          id: `error-${Date.now()}`,
+          role: 'assistant',
+          content: error?.message || 'تعذر الاتصال بالمساعد. حاول مرة أخرى.'
+        }]
+      }));
     } finally {
       if (requestId === requestIdRef.current) setIsLoading(false);
     }
@@ -146,8 +165,12 @@ export default function App() {
   }
 
   async function copyMessage(message) {
-    try { await navigator.clipboard.writeText(message.content); setCopiedId(message.id); }
-    catch { setCopiedId(null); }
+    try {
+      await navigator.clipboard.writeText(message.content);
+      setCopiedId(message.id);
+    } catch {
+      setCopiedId(null);
+    }
   }
 
   return (
@@ -161,25 +184,73 @@ export default function App() {
         <button className="new-chat-button" type="button" onClick={createNewChat}><NewChatIcon /><span>محادثة جديدة</span></button>
         <div className="history-heading">الأخيرة</div>
         <nav className="chat-history" aria-label="المحادثات السابقة">
-          {chats.map((chat) => <button className={`history-item${chat.id === activeChatId ? ' history-item-active' : ''}`} key={chat.id} type="button" title={chat.title} onClick={() => selectChat(chat.id)}><span className="history-bubble" aria-hidden="true" /><span>{chat.title}</span></button>)}
+          {chats.map((chat) => (
+            <button className={`history-item${chat.id === activeChatId ? ' history-item-active' : ''}`} key={chat.id} type="button" title={chat.title} onClick={() => selectChat(chat.id)}>
+              <span className="history-bubble" aria-hidden="true" /><span>{chat.title}</span>
+            </button>
+          ))}
         </nav>
         <div className="sidebar-footer"><BrandMark small /><div><div className="footer-title">Zaka+ للذكاء الاصطناعي</div><div className="footer-caption">اختر النموذج المناسب لمحادثتك</div></div></div>
       </aside>
+
       {sidebarOpen && <button className="sidebar-backdrop" type="button" aria-label="إغلاق القائمة" onClick={() => setSidebarOpen(false)} />}
+
       <main className="main-panel">
         <header className="topbar">
           <button className="icon-button mobile-menu" type="button" aria-label="فتح قائمة المحادثات" onClick={() => setSidebarOpen(true)}><span className="menu-glyph" aria-hidden="true">☰</span></button>
-          <div className="model-selector"><span>ذكاء بلس</span><select className="model-version" aria-label="اختيار نموذج الذكاء الاصطناعي" value={selectedModel} onChange={(event) => setSelectedModel(event.target.value)} disabled={isLoading}>{models.map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}</select><span className="chevron" aria-hidden="true">⌄</span></div>
+          <div className="model-selector">
+            <span>ذكاء بلس</span>
+            <select className="model-version" aria-label="اختيار نموذج الذكاء الاصطناعي" value={selectedModel} onChange={(event) => setSelectedModel(event.target.value)} disabled={isLoading}>
+              {models.map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}
+            </select>
+            <span className="chevron" aria-hidden="true">⌄</span>
+          </div>
           <div className="topbar-spacer" /><span className="topbar-status"><span className="status-dot" /> جاهز</span>
         </header>
+
         <section className={`conversation${isEmptyChat ? ' conversation-empty' : ''}`} aria-label="المحادثة">
-          {isEmptyChat ? <div className="welcome-panel"><div className="welcome-mark"><BrandMark /></div><h1>كيف أقدر أساعدك؟</h1><p>اسأل، اكتب، أو ابدأ بفكرة — وأنا أساعدك في الخطوة التالية.</p><div className="suggestion-grid">{suggestions.map((suggestion) => <button className="suggestion-card" key={suggestion.title} type="button" onClick={() => { setInput(suggestion.title); textareaRef.current?.focus(); }}><span className="suggestion-title">{suggestion.title}</span><span className="suggestion-detail">{suggestion.detail}</span></button>)}</div></div> : <div className="message-list">
-            {messages.filter((message) => message.id !== 'welcome').map((message) => <article className={`message message-${message.role}`} key={message.id}>{message.role === 'assistant' && <BrandMark small />}<div className="message-body">{message.role === 'assistant' && <div className="message-author">ذكاء بلس</div>}<div className="message-content">{message.content}</div>{message.role === 'assistant' && !message.id.startsWith('error-') && <button className="copy-button" type="button" onClick={() => copyMessage(message)} aria-label="نسخ الرد"><CopyIcon /><span>{copiedId === message.id ? 'تم النسخ' : 'نس��'}</span></button>}</div></article>)}
-            {isLoading && <article className="message message-assistant" aria-label="المساعد يكتب"><BrandMark small /><div className="message-body"><div className="message-author">ذكاء بلس</div><div className="typing-indicator"><i /><i /><i /></div></div></article>}
-            <div ref={bottomRef} />
-          </div>}
+          {isEmptyChat ? (
+            <div className="welcome-panel">
+              <div className="welcome-mark"><BrandMark /></div>
+              <h1>كيف أقدر أساعدك؟</h1>
+              <p>اسأل، اكتب، أو ابدأ بفكرة — وأنا أساعدك في الخطوة التالية.</p>
+              <div className="suggestion-grid">
+                {suggestions.map((suggestion) => (
+                  <button className="suggestion-card" key={suggestion.title} type="button" onClick={() => { setInput(suggestion.title); textareaRef.current?.focus(); }}>
+                    <span className="suggestion-title">{suggestion.title}</span><span className="suggestion-detail">{suggestion.detail}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="message-list">
+              {messages.filter((message) => message.id !== 'welcome').map((message) => (
+                <article className={`message message-${message.role}`} key={message.id}>
+                  {message.role === 'assistant' && <BrandMark small />}
+                  <div className="message-body">
+                    {message.role === 'assistant' && <div className="message-author">ذكاء بلس</div>}
+                    <div className="message-content">{message.content}</div>
+                    {message.role === 'assistant' && !message.id.startsWith('error-') && (
+                      <button className="copy-button" type="button" onClick={() => copyMessage(message)} aria-label="نسخ الرد"><CopyIcon /><span>{copiedId === message.id ? 'تم النسخ' : 'نسخ'}</span></button>
+                    )}
+                  </div>
+                </article>
+              ))}
+              {isLoading && <article className="message message-assistant" aria-label="المساعد يكتب"><BrandMark small /><div className="message-body"><div className="message-author">ذكاء بلس</div><div className="typing-indicator"><i /><i /><i /></div></div></article>}
+              <div ref={bottomRef} />
+            </div>
+          )}
         </section>
-        <div className="composer-area"><form className="composer" onSubmit={handleSend}><textarea ref={textareaRef} rows={1} value={input} onChange={handleInputChange} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); handleSend(event); } }} placeholder="اكتب رسالتك إلى ذكاء بلس..." aria-label="رسالتك" disabled={isLoading} /><button className="send-button" type="submit" disabled={!input.trim() || isLoading} aria-label="إرسال الرسالة"><SendIcon /></button></form><p className="disclaimer">قد ينتج {selectedModelLabel} إجابات غير دقيقة؛ تحقّق من المعلومات المهمة.</p></div>
+
+        <div className="composer-area">
+          <form className="composer" onSubmit={handleSend}>
+            <textarea ref={textareaRef} rows={1} value={input} onChange={handleInputChange} onKeyDown={(event) => {
+              if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); handleSend(event); }
+            }} placeholder="اكتب رسالتك إلى ذكاء بلس..." aria-label="رسالتك" disabled={isLoading} />
+            <button className="send-button" type="submit" disabled={!input.trim() || isLoading} aria-label="إرسال الرسالة"><SendIcon /></button>
+          </form>
+          <p className="disclaimer">قد ينتج {selectedModelLabel} إجابات غير دقيقة؛ تحقّق من المعلومات المهمة.</p>
+        </div>
       </main>
     </div>
   );
