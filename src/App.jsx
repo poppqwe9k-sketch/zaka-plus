@@ -12,20 +12,23 @@ const suggestions = [
   { title: 'ساعدني في فكرة', detail: 'عصف ذهني واقتراحات جديدة' }
 ];
 
-/** Calls the same-origin Cloudflare Pages Function; no API key is exposed in the browser bundle. */
 async function getAssistantReply(conversation) {
   const response = await fetch('/api/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ messages: conversation })
+    body: JSON.stringify({
+      messages: conversation
+        .filter((message) => message.id !== 'welcome' && !message.id.startsWith('error-'))
+        .map(({ role, content }) => ({ role, content }))
+    })
   });
 
   const result = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(result.error || 'تعذر الاتصال بالمساعد. حاول مرة أخرى لاحقاً.');
+    throw new Error(result.error || `تعذر الاتصال بالمساعد (HTTP ${response.status}).`);
   }
   if (typeof result.reply !== 'string' || !result.reply.trim()) {
-    throw new Error('لم يصل رد نصي من المساعد. حاول مرة أخرى.');
+    throw new Error('لم يصل رد نصي من Gemini. حاول مرة أخرى.');
   }
   return result.reply;
 }
@@ -66,7 +69,6 @@ export default function App() {
   const [messagesByChat, setMessagesByChat] = useState({ 'chat-1': [initialMessage] });
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [errorMessage, setErrorMessage] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [copiedId, setCopiedId] = useState(null);
   const textareaRef = useRef(null);
@@ -92,7 +94,6 @@ export default function App() {
     setMessagesByChat((current) => ({ ...current, [id]: [initialMessage] }));
     setActiveChatId(id);
     setInput('');
-    setErrorMessage('');
     setIsLoading(false);
     setSidebarOpen(false);
     requestIdRef.current += 1;
@@ -101,7 +102,6 @@ export default function App() {
   function selectChat(id) {
     setActiveChatId(id);
     setInput('');
-    setErrorMessage('');
     setSidebarOpen(false);
     setIsLoading(false);
     requestIdRef.current += 1;
@@ -128,16 +128,11 @@ export default function App() {
         : chat
     )));
     setInput('');
-    setErrorMessage('');
     setIsLoading(true);
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
 
     try {
-      // Send conversation history, excluding the welcome message and UI-only errors.
-      const history = updatedMessages
-        .filter((message) => message.id !== 'welcome' && ['user', 'assistant'].includes(message.role))
-        .map(({ role, content }) => ({ role, content }));
-      const answer = await getAssistantReply(history);
+      const answer = await getAssistantReply(updatedMessages);
       if (requestId !== requestIdRef.current) return;
       setMessagesByChat((current) => ({
         ...current,
@@ -148,7 +143,17 @@ export default function App() {
       }));
     } catch (error) {
       if (requestId !== requestIdRef.current) return;
-      setErrorMessage(error?.message || 'تعذر الاتصال بالمساعد. تحقق من الإعدادات ثم حاول مجدداً.');
+      setMessagesByChat((current) => ({
+        ...current,
+        [chatId]: [
+          ...(current[chatId] || updatedMessages),
+          {
+            id: `error-${Date.now()}`,
+            role: 'assistant',
+            content: error?.message || 'تعذر الاتصال بالمساعد. حاول مرة أخرى.'
+          }
+        ]
+      }));
     } finally {
       if (requestId === requestIdRef.current) setIsLoading(false);
     }
@@ -156,7 +161,6 @@ export default function App() {
 
   function handleInputChange(event) {
     setInput(event.target.value);
-    setErrorMessage('');
     event.target.style.height = 'auto';
     event.target.style.height = `${Math.min(event.target.scrollHeight, 180)}px`;
   }
@@ -166,7 +170,7 @@ export default function App() {
       await navigator.clipboard.writeText(message.content);
       setCopiedId(message.id);
     } catch {
-      setErrorMessage('تعذر نسخ الرد. تحقق من صلاحية الحافظة في المتصفح.');
+      setCopiedId(null);
     }
   }
 
@@ -232,7 +236,7 @@ export default function App() {
           <span className="topbar-status"><span className="status-dot" /> جاهز</span>
         </header>
 
-        <section className={`conversation${isEmptyChat ? ' conversation-empty' : ''}`} aria-label="المحادثة" aria-live="polite">
+        <section className={`conversation${isEmptyChat ? ' conversation-empty' : ''}`} aria-label="المحادثة">
           {isEmptyChat ? (
             <div className="welcome-panel">
               <div className="welcome-mark"><BrandMark /></div>
@@ -263,7 +267,7 @@ export default function App() {
                   <div className="message-body">
                     {message.role === 'assistant' && <div className="message-author">ذكاء بلس</div>}
                     <div className="message-content">{message.content}</div>
-                    {message.role === 'assistant' && (
+                    {message.role === 'assistant' && !message.id.startsWith('error-') && (
                       <button className="copy-button" type="button" onClick={() => copyMessage(message)} aria-label="نسخ الرد">
                         <CopyIcon />
                         <span>{copiedId === message.id ? 'تم النسخ' : 'نسخ'}</span>
@@ -287,7 +291,6 @@ export default function App() {
         </section>
 
         <div className="composer-area">
-          {errorMessage && <p className="error-message" role="alert">{errorMessage}</p>}
           <form className="composer" onSubmit={handleSend}>
             <textarea
               ref={textareaRef}

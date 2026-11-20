@@ -13,33 +13,18 @@ function json(body, status = 200) {
   });
 }
 
-function getGeminiError(status) {
-  if (status === 400) {
-    return 'رفض Gemini صيغة الطلب. تحقق من سجل المحادثة وإعداد النموذج GEMINI_MODEL.';
-  }
-  if (status === 401) {
-    return 'رفض Gemini مفتاح API. تحقق من قيمة Secret باسم GEMINI_API_KEY في إعدادات Worker ثم أعد النشر.';
-  }
-  if (status === 403) {
-    return 'مفتاح Gemini لا يملك صلاحية الوصول. تحقق من تفعيل Gemini API ومن قيود المفتاح في Google AI Studio.';
-  }
-  if (status === 404) {
-    return `لم يُعثر على نموذج Gemini المطلوب. النموذج الحالي هو ${DEFAULT_MODEL} افتراضياً؛ تحقق من توفره أو اضبط GEMINI_MODEL على اسم نموذج متاح.`;
-  }
-  if (status === 429) {
-    return 'تم بلوغ حد طلبات Gemini أو الحصة المتاحة. انتظر قليلاً أو تحقق من الحصة وحدود الاستخدام في Google AI Studio.';
-  }
-  if (status >= 500) {
-    return 'خدمة Gemini تواجه عطلاً مؤقتاً. حاول مرة أخرى لاحقاً.';
-  }
-  return 'تعذر إكمال الطلب إلى Gemini. تحقق من إعدادات النموذج والمفتاح ثم حاول مجدداً.';
+function safeProviderMessage(result, apiKey) {
+  const message = result?.error?.message;
+  if (typeof message !== 'string' || !message.trim()) return '';
+  // Avoid accidentally returning a secret if the upstream error ever echoes it.
+  return message.replaceAll(apiKey, '[redacted]').slice(0, 700);
 }
 
 export async function onRequestPost({ request, env = {} }) {
-  // Worker Secrets are exposed as env bindings at runtime; never read this from client-side Vite env.
+  // Cloudflare Worker secrets and vars are runtime bindings on env.
   const apiKey = typeof env.GEMINI_API_KEY === 'string' ? env.GEMINI_API_KEY.trim() : '';
   if (!apiKey) {
-    return json({ error: 'المساعد غير مهيأ: أضف GEMINI_API_KEY كـ Secret إلى بيئة Worker المنشورة.' }, 503);
+    return json({ error: 'المساعد غير مهيأ: تحقق من إضافة GEMINI_API_KEY كـ Secret إلى Worker المنشور.' }, 503);
   }
 
   let payload;
@@ -65,7 +50,8 @@ export async function onRequestPost({ request, env = {} }) {
     contents.push({ role: item.role === 'assistant' ? 'model' : 'user', parts: [{ text }] });
   }
 
-  // Gemini accepts alternating user/model turns. Merge consecutive turns defensively.
+  // Gemini expects turns to alternate between user and model. Merge adjacent
+  // turns of the same role to keep the request valid if history is malformed.
   const normalizedContents = [];
   for (const item of contents) {
     const previous = normalizedContents[normalizedContents.length - 1];
@@ -79,12 +65,14 @@ export async function onRequestPost({ request, env = {} }) {
     return json({ error: 'ابدأ المحادثة برسالة من المستخدم ثم أعد المحاولة.' }, 400);
   }
 
-  const model = (typeof env.GEMINI_MODEL === 'string' && env.GEMINI_MODEL.trim())
-    ? env.GEMINI_MODEL.trim()
-    : DEFAULT_MODEL;
-  const baseUrl = (typeof env.GEMINI_API_BASE_URL === 'string' && env.GEMINI_API_BASE_URL.trim())
-    ? env.GEMINI_API_BASE_URL.trim().replace(/\/+$/, '')
-    : DEFAULT_API_BASE_URL;
+  // Runtime vars are strings. Trim whitespace, and allow either a bare model
+  // ID or the API's conventional `models/<id>` form.
+  const configuredModel = typeof env.GEMINI_MODEL === 'string' ? env.GEMINI_MODEL.trim() : '';
+  const model = (configuredModel || DEFAULT_MODEL).replace(/^models\//, '');
+  const configuredBaseUrl = typeof env.GEMINI_API_BASE_URL === 'string'
+    ? env.GEMINI_API_BASE_URL.trim()
+    : '';
+  const baseUrl = (configuredBaseUrl || DEFAULT_API_BASE_URL).replace(/\/+$/, '');
 
   let endpoint;
   try {
@@ -99,7 +87,6 @@ export async function onRequestPost({ request, env = {} }) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        // Send the secret in a header rather than the URL to avoid URL/log leakage.
         'x-goog-api-key': apiKey
       },
       body: JSON.stringify({ contents: normalizedContents })
@@ -112,12 +99,21 @@ export async function onRequestPost({ request, env = {} }) {
   try {
     result = await upstream.json();
   } catch {
-    return json({ error: `أعادت Gemini استجابة غير صالحة (HTTP ${upstream.status}). حاول لاحقاً.` }, 502);
+    return json({
+      error: `أعادت Gemini استجابة غير صالحة (HTTP ${upstream.status}) للنموذج ${model}.`,
+      model,
+      apiVersion: baseUrl.split('/').pop()
+    }, 502);
   }
 
   if (!upstream.ok) {
-    // Keep API keys and raw provider details out of user-visible errors and logs.
-    return json({ error: getGeminiError(upstream.status) }, upstream.status === 429 ? 429 : 502);
+    const providerMessage = safeProviderMessage(result, apiKey);
+    const apiVersion = baseUrl.split('/').pop();
+    const details = providerMessage || upstream.statusText || 'لا توجد تفاصيل إضافية من Gemini.';
+    const error = `فشل طلب Gemini (HTTP ${upstream.status}) للنموذج "${model}" عبر ${apiVersion}: ${details}`;
+    // Preserve client/rate-limit status codes so the UI and diagnostics can identify them.
+    const status = [400, 401, 403, 404, 429].includes(upstream.status) ? upstream.status : 502;
+    return json({ error, model, apiVersion, providerStatus: result?.error?.status || null }, status);
   }
 
   const reply = result?.candidates?.[0]?.content?.parts
@@ -130,9 +126,10 @@ export async function onRequestPost({ request, env = {} }) {
     return json({
       error: wasBlocked
         ? 'لم يتمكن Gemini من معالجة هذا الطلب. أعد صياغته بطريقة مختلفة.'
-        : 'استقبل Worker رداً ناجحاً من Gemini لكنه لا يحتوي على نص. حاول بصياغة أخرى.'
+        : `أعاد Gemini استجابة ناجحة للنموذج "${model}" لكنها لا تحتوي على نص.`,
+      model
     }, 502);
   }
 
-  return json({ reply });
+  return json({ reply, model });
 }
