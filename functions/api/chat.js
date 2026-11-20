@@ -1,7 +1,9 @@
 const DEFAULT_MODEL = 'gemini-2.5-flash';
+const DEFAULT_FALLBACK_MODEL = 'gemini-3.5-flash-lite';
 const DEFAULT_API_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
 const MAX_MESSAGES = 50;
 const MAX_MESSAGE_LENGTH = 12000;
+const MAX_ATTEMPTS_PER_MODEL = 2;
 
 function json(body, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -16,12 +18,106 @@ function json(body, status = 200) {
 function safeProviderMessage(result, apiKey) {
   const message = result?.error?.message;
   if (typeof message !== 'string' || !message.trim()) return '';
-  // Avoid accidentally returning a secret if the upstream error ever echoes it.
   return message.replaceAll(apiKey, '[redacted]').slice(0, 700);
 }
 
+function normalizeModel(value, fallback) {
+  const model = typeof value === 'string' ? value.trim() : '';
+  return (model || fallback).replace(/^models\//, '');
+}
+
+function getProviderError(response, result, model, baseUrl, apiKey) {
+  const details = safeProviderMessage(result, apiKey)
+    || response.statusText
+    || 'لا ت��جد تفاصيل إضافية من Gemini.';
+  const apiVersion = baseUrl.split('/').pop();
+  return {
+    error: `فشل طلب Gemini (HTTP ${response.status}) للنموذج "${model}" عبر ${apiVersion}: ${details}`,
+    model,
+    apiVersion,
+    providerStatus: result?.error?.status || null
+  };
+}
+
+async function requestModel({ model, apiKey, baseUrl, contents }) {
+  let endpoint;
+  try {
+    endpoint = new URL(`${baseUrl}/models/${encodeURIComponent(model)}:generateContent`);
+  } catch {
+    return { error: { error: 'عنوان Gemini API غير صالح. تحقق من GEMINI_API_BASE_URL.' }, status: 500 };
+  }
+
+  let lastResponse;
+  for (let attempt = 0; attempt < MAX_ATTEMPTS_PER_MODEL; attempt += 1) {
+    try {
+      lastResponse = await fetch(endpoint.toString(), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': apiKey
+        },
+        body: JSON.stringify({ contents })
+      });
+    } catch {
+      return {
+        error: { error: 'تعذر الاتصال بخدمة Gemini. تحقق من اتصال Worker وحاول مجدداً.', model },
+        status: 502
+      };
+    }
+
+    if (lastResponse.status !== 503 || attempt === MAX_ATTEMPTS_PER_MODEL - 1) break;
+
+    // Brief exponential backoff with jitter; keep the Worker request bounded.
+    const delay = 250 * (2 ** attempt) + Math.floor(Math.random() * 200);
+    await new Promise((resolve) => setTimeout(resolve, delay));
+  }
+
+  let result;
+  try {
+    result = await lastResponse.json();
+  } catch {
+    return {
+      error: {
+        error: `أعادت Gemini استجابة غير صالحة (HTTP ${lastResponse.status}) للنموذج "${model}".`,
+        model,
+        apiVersion: baseUrl.split('/').pop()
+      },
+      status: 502
+    };
+  }
+
+  if (!lastResponse.ok) {
+    const status = lastResponse.status;
+    const outputStatus = [400, 401, 403, 404, 429, 503].includes(status) ? status : 502;
+    return {
+      error: getProviderError(lastResponse, result, model, baseUrl, apiKey),
+      status: outputStatus,
+      upstreamStatus: status
+    };
+  }
+
+  const reply = result?.candidates?.[0]?.content?.parts
+    ?.map((part) => typeof part.text === 'string' ? part.text : '')
+    .join('')
+    .trim();
+
+  if (!reply) {
+    const wasBlocked = result?.promptFeedback?.blockReason;
+    return {
+      error: {
+        error: wasBlocked
+          ? 'لم يتمكن Gemini من معالجة هذا الطلب. أعد صياغته بطريقة مختلفة.'
+          : `أعاد Gemini استجابة ناجحة للنموذج "${model}" لكنها لا تحتوي على نص.`,
+        model
+      },
+      status: 502
+    };
+  }
+
+  return { reply, model };
+}
+
 export async function onRequestPost({ request, env = {} }) {
-  // Cloudflare Worker secrets and vars are runtime bindings on env.
   const apiKey = typeof env.GEMINI_API_KEY === 'string' ? env.GEMINI_API_KEY.trim() : '';
   if (!apiKey) {
     return json({ error: 'المساعد غير مهيأ: تحقق من إضافة GEMINI_API_KEY كـ Secret إلى Worker المنشور.' }, 503);
@@ -50,8 +146,6 @@ export async function onRequestPost({ request, env = {} }) {
     contents.push({ role: item.role === 'assistant' ? 'model' : 'user', parts: [{ text }] });
   }
 
-  // Gemini expects turns to alternate between user and model. Merge adjacent
-  // turns of the same role to keep the request valid if history is malformed.
   const normalizedContents = [];
   for (const item of contents) {
     const previous = normalizedContents[normalizedContents.length - 1];
@@ -65,71 +159,39 @@ export async function onRequestPost({ request, env = {} }) {
     return json({ error: 'ابدأ المحادثة برسالة من المستخدم ثم أعد المحاولة.' }, 400);
   }
 
-  // Runtime vars are strings. Trim whitespace, and allow either a bare model
-  // ID or the API's conventional `models/<id>` form.
-  const configuredModel = typeof env.GEMINI_MODEL === 'string' ? env.GEMINI_MODEL.trim() : '';
-  const model = (configuredModel || DEFAULT_MODEL).replace(/^models\//, '');
+  const primaryModel = normalizeModel(env.GEMINI_MODEL, DEFAULT_MODEL);
+  const fallbackModel = normalizeModel(env.GEMINI_FALLBACK_MODEL, DEFAULT_FALLBACK_MODEL);
   const configuredBaseUrl = typeof env.GEMINI_API_BASE_URL === 'string'
     ? env.GEMINI_API_BASE_URL.trim()
     : '';
   const baseUrl = (configuredBaseUrl || DEFAULT_API_BASE_URL).replace(/\/+$/, '');
 
-  let endpoint;
-  try {
-    endpoint = new URL(`${baseUrl}/models/${encodeURIComponent(model)}:generateContent`);
-  } catch {
-    return json({ error: 'عنوان Gemini API غير صالح. تحقق من GEMINI_API_BASE_URL.' }, 500);
-  }
+  const primary = await requestModel({
+    model: primaryModel,
+    apiKey,
+    baseUrl,
+    contents: normalizedContents
+  });
+  if (primary.reply) return json(primary);
 
-  let upstream;
-  try {
-    upstream = await fetch(endpoint.toString(), {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-goog-api-key': apiKey
-      },
-      body: JSON.stringify({ contents: normalizedContents })
+  // Retry only transient service-unavailable errors on a secondary model.
+  // Do not conceal authentication, quota, invalid request, or model-name errors.
+  if (primary.upstreamStatus === 503 && fallbackModel !== primaryModel) {
+    const fallback = await requestModel({
+      model: fallbackModel,
+      apiKey,
+      baseUrl,
+      contents: normalizedContents
     });
-  } catch {
-    return json({ error: 'تعذر الاتصال بخدمة Gemini. تحقق من اتصال Worker وحاول مجدداً.' }, 502);
-  }
+    if (fallback.reply) return json({ ...fallback, fallbackUsed: true });
 
-  let result;
-  try {
-    result = await upstream.json();
-  } catch {
     return json({
-      error: `أعادت Gemini استجابة غير صالحة (HTTP ${upstream.status}) للنموذج ${model}.`,
-      model,
-      apiVersion: baseUrl.split('/').pop()
-    }, 502);
+      error: `النموذج الأساسي "${primaryModel}" غير متاح مؤقتاً (HTTP 503)، كما تعذر النموذج البديل "${fallbackModel}": ${fallback.error?.error || 'خطأ غير معروف.'}`,
+      model: primaryModel,
+      fallbackModel,
+      fallbackStatus: fallback.upstreamStatus || fallback.status
+    }, fallback.status || 502);
   }
 
-  if (!upstream.ok) {
-    const providerMessage = safeProviderMessage(result, apiKey);
-    const apiVersion = baseUrl.split('/').pop();
-    const details = providerMessage || upstream.statusText || 'لا توجد تفاصيل إضافية من Gemini.';
-    const error = `فشل طلب Gemini (HTTP ${upstream.status}) للنموذج "${model}" عبر ${apiVersion}: ${details}`;
-    // Preserve client/rate-limit status codes so the UI and diagnostics can identify them.
-    const status = [400, 401, 403, 404, 429].includes(upstream.status) ? upstream.status : 502;
-    return json({ error, model, apiVersion, providerStatus: result?.error?.status || null }, status);
-  }
-
-  const reply = result?.candidates?.[0]?.content?.parts
-    ?.map((part) => typeof part.text === 'string' ? part.text : '')
-    .join('')
-    .trim();
-
-  if (!reply) {
-    const wasBlocked = result?.promptFeedback?.blockReason;
-    return json({
-      error: wasBlocked
-        ? 'لم يتمكن Gemini من معالجة هذا الطلب. أعد صياغته بطريقة مختلفة.'
-        : `أعاد Gemini استجابة ناجحة للنموذج "${model}" لكنها لا تحتوي على نص.`,
-      model
-    }, 502);
-  }
-
-  return json({ reply, model });
+  return json(primary.error || { error: 'تعذر إكمال الطلب إلى Gemini.' }, primary.status || 502);
 }

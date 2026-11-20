@@ -1,18 +1,24 @@
 # ذكاء بلس | Zaka+
 
-واجهة دردشة عربية RTL مبنية بـ React وVite. ينشرها Cloudflare Worker مع أصول Vite من `dist/` ومسار خادمي آمن لـ Gemini على `/api/chat`.
+واجهة دردشة عربية RTL مبنية بـ React وVite، ينشرها Cloudflare Worker مع أصول Vite من `dist/` ومسار خادمي آمن لـ Gemini على `/api/chat`.
 
-## إعداد النموذج
+## التعامل مع HTTP 503 من Gemini
 
-Worker يقرأ `GEMINI_MODEL` كـ Cloudflare runtime variable (مع حذف المسافات، ودعم الاسم `models/<id>`، والرجوع إلى `gemini-2.5-flash` إذا لم يُضبط). عنوان REST الافتراضي هو `https://generativelanguage.googleapis.com/v1beta`، ويمكن تغييره إلى `v1` عبر `GEMINI_API_BASE_URL`.
+عند فشل النموذج الأساسي (المحدد عبر `GEMINI_MODEL`، أو الافتراضي `gemini-2.5-flash`) باستجابة HTTP 503، يعيد Worker المحاولة مرة واحدة بانتظار قصير بتأخير أسي مع jitter. إذا استمر 503، يجرب النموذج الاحتياطي المحدد عبر `GEMINI_FALLBACK_MODEL`؛ الافتراضي `gemini-3.5-flash-lite`. عند نجاح البديل يُعاد الرد مع `fallbackUsed: true`. لا ينتقل إلى بديل عند أخطاء المفتاح أو الصلاحيات أو الطلب (مثل 401/403/400)، لتجنب إخفاء الإعداد الخاطئ.
 
-لإعداد `gemini-2.0-flash` في Cloudflare، تأكد أن Worker variable اسمه تماماً `GEMINI_MODEL` وقيمته `gemini-2.0-flash` في البيئة المنشورة، ثم أعد نشر Worker. المتصفح لا يرسل النموذج ولا يملك وصولاً إلى المفتاح؛ يرسِل سجل المحادثة فقط إلى `/api/chat`.
+يمكن تغيير النموذجين كمتغيرات Runtime في Worker:
 
-في حال رفض Gemini الطلب، يعرض Worker الآن HTTP status ورقم/وصف الحالة والنموذج وإصدار API، إضافة إلى رسالة `error.message` الواردة من Gemini بعد تنقيح المفتاح. أمثلة: invalid API key (401)، صلاحيات/قيود API key (403)، model not found (404)، الحصة (429).
+- `GEMINI_MODEL`: الأساسي.
+- `GEMINI_FALLBACK_MODEL`: البديل.
+- `GEMINI_API_BASE_URL`: افتراضياً `https://generativelanguage.googleapis.com/v1beta`.
+- `GEMINI_API_KEY`: Secret؛ لا تضعه في متغير `VITE_*` أو ملفات المتصفح.
 
-## الأمان والنشر
+## البناء والنشر
 
-- لا تستخدم `VITE_GEMINI_API_KEY`؛ فهذا سيكشف المفتاح في ملفات المتصفح.
-- خزّن `GEMINI_API_KEY` كـ Worker Secret في Cloudflare.
-- عيّن `GEMINI_MODEL` و`GEMINI_API_BASE_URL` كـ runtime variables للـ Worker، لا كمتغيرات Vite.
-- انشر Worker وأصول `dist/` عبر Workers Builds؛ أمر البناء `npm run build` وأمر النشر `npx wrangler deploy`.
+```bash
+npm install
+npm run build
+npx wrangler deploy
+```
+
+أمر `npm run build` ينشئ أصول Vite في `dist/`. يقدّم Worker هذه الأصول ويعالج `/api/chat` خادمياً. تأكد أن النشر على Cloudflare Workers يتضمن Worker وملفات `dist/`، وأن الأسرار والمتغيرات موجودة في البيئة المنش��رة.
