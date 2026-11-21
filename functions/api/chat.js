@@ -3,6 +3,8 @@ const MODEL_NAME = 'Gemini 3.1 Flash Lite';
 const API_VERSION = 'v1beta';
 const MAX_MESSAGES = 10;
 const MAX_MESSAGE_LENGTH = 12000;
+const MAX_ATTACHMENTS = 4;
+const MAX_ATTACHMENT_BYTES = 7 * 1024 * 1024;
 const REQUEST_TIMEOUT_MS = 14000;
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -36,6 +38,22 @@ function validateMessages(value) {
   return { messages };
 }
 
+function validateAttachments(value) {
+  if (value === undefined) return { attachments: [] };
+  if (!Array.isArray(value) || value.length > MAX_ATTACHMENTS) return { error: `يمكن إرفاق ${MAX_ATTACHMENTS} ملفات كحد أقصى.` };
+  const attachments = [];
+  for (const item of value) {
+    if (!item || typeof item.data !== 'string' || typeof item.mimeType !== 'string') return { error: 'بيانات أحد المرفقات غير صالحة.' };
+    const match = item.data.match(/^data:([^;,]+);base64,([A-Za-z0-9+/=]+)$/);
+    if (!match || match[1].toLowerCase() !== item.mimeType.toLowerCase()) return { error: 'تعذر قراءة أحد المرفقات. أعد اختياره.' };
+    const mimeType = item.mimeType.toLowerCase();
+    if (!mimeType.startsWith('image/') && mimeType !== 'application/pdf') return { error: 'الملفات المرفقة المدعومة هي الصور وPDF.' };
+    if (match[2].length > Math.ceil(MAX_ATTACHMENT_BYTES * 4 / 3)) return { error: 'حجم المرفق يتجاوز الحد الأقصى وهو 7 ميغابايت.' };
+    attachments.push({ mimeType, data: match[2] });
+  }
+  return { attachments };
+}
+
 function extractReply(data) {
   const parts = data?.candidates?.[0]?.content?.parts;
   return Array.isArray(parts) ? parts.map((part) => typeof part?.text === 'string' ? part.text : '').join('').trim() : '';
@@ -51,13 +69,25 @@ async function handleChat(request, env) {
 
   const validation = validateMessages(body?.messages);
   if (validation.error) return json({ error: validation.error }, 400);
+  const attachmentValidation = validateAttachments(body?.attachments);
+  if (attachmentValidation.error) return json({ error: attachmentValidation.error }, 400);
 
   const apiKey = typeof env?.GEMINI_API_KEY === 'string' ? env.GEMINI_API_KEY.trim() : '';
   if (!apiKey) return json({ error: 'المساعد غير مهيأ: أضف GEMINI_API_KEY كـ Secret إلى Cloudflare Worker.' }, 503);
 
   const systemInstruction = typeof body?.systemInstruction === 'string' && body.systemInstruction.trim()
-    ? body.systemInstruction.trim().slice(0, 2000)
+    ? body.systemInstruction.trim().slice(0, 3000)
     : 'أنت مساعد ذكاء بلس | Zaka+. أجب بدقة ووضوح وباللغة التي يطلبها المستخدم.';
+  const contents = validation.messages;
+  if (attachmentValidation.attachments.length) {
+    let lastUserIndex = -1;
+    for (let index = contents.length - 1; index >= 0; index -= 1) {
+      if (contents[index].role === 'user') { lastUserIndex = index; break; }
+    }
+    if (lastUserIndex < 0) return json({ error: 'يجب إرفاق الملفات مع رسالة من المستخدم.' }, 400);
+    contents[lastUserIndex].parts.push(...attachmentValidation.attachments.map(({ mimeType, data }) => ({ inlineData: { mimeType, data } })));
+  }
+
   const endpoint = `https://generativelanguage.googleapis.com/${API_VERSION}/models/${MODEL_ID}:generateContent`;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -67,7 +97,7 @@ async function handleChat(request, env) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
       body: JSON.stringify({
-        contents: validation.messages,
+        contents,
         systemInstruction: { parts: [{ text: systemInstruction }] },
         generationConfig: { temperature: 0.7, maxOutputTokens: 4096 }
       }),
