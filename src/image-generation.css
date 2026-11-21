@@ -1,0 +1,32 @@
+.generated-image-card .image-generation-pending {
+  visibility: hidden;
+}
+.image-generation-status {
+  display: flex;
+  min-height: 120px;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 15px;
+  color: var(--muted);
+  background: var(--surface-hover);
+  font-size: 13px;
+}
+.image-generation-status[data-state="loading"]::before {
+  width: 18px;
+  height: 18px;
+  border: 2px solid currentColor;
+  border-left-color: transparent;
+  border-radius: 50%;
+  content: "";
+  animation: image-generation-spin .8s linear infinite;
+}
+@keyframes image-generation-spin { to { transform: rotate(360deg); } }
+.generated-image-card .image-generation-ready {
+  visibility: visible;
+  width: min(100%, 560px);
+  height: auto;
+  max-height: 600px;
+  object-fit: contain;
+}
