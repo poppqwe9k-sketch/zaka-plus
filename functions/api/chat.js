@@ -1,5 +1,5 @@
 const GEMINI_MODEL_ID = 'gemini-3.1-flash-lite';
-const GEMINI_MODEL_NAME = 'Gemini 3.1 Flash Lite';
+const GEMINI_MODEL_NAME = 'بلس برو';
 const CLOUDFLARE_MODEL_ID = '@cf/meta/llama-3.3-70b-instruct-fp8-fast';
 const API_VERSION = 'v1beta';
 const MAX_MESSAGES = 10;
