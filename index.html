@@ -8,14 +8,31 @@
     <meta property="og:type" content="website" />
     <meta property="og:title" content="ذكاء بلس | Zaka+" />
     <meta property="og:description" content="مساعدك الذكي باللغة العربية." />
-    <meta property="og:image" content="https://zaka-plus.pages.dev/logo.svg" />
+    <meta property="og:image" content="https://zaka-plus.pages.dev/pwa-icon.svg" />
     <meta property="og:image:alt" content="شعار ذكاء بلس Zaka+" />
     <meta name="twitter:card" content="summary" />
     <meta name="twitter:title" content="ذكاء بلس | Zaka+" />
     <meta name="twitter:description" content="مساعدك الذكي باللغة العربية." />
-    <meta name="twitter:image" content="https://zaka-plus.pages.dev/logo.svg" />
-    <link rel="icon" type="image/svg+xml" href="/logo.svg" />
+    <meta name="twitter:image" content="https://zaka-plus.pages.dev/pwa-icon.svg" />
+    <link rel="icon" type="image/svg+xml" href="/pwa-icon.svg" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/pwa-icon.svg" />
     <title>ذكاء بلس | Zaka+</title>
+    <script>
+      // Pick the browser language only once; any saved or legacy user choice takes precedence.
+      try {
+        const key = 'zaka-plus-chat-v5';
+        const saved = JSON.parse(localStorage.getItem(key) || '{}');
+        const legacy = JSON.parse(localStorage.getItem('ai_app_settings') || '{}');
+        const hasSavedLanguage = Object.prototype.hasOwnProperty.call(saved.settings || {}, 'lang')
+          || Object.prototype.hasOwnProperty.call(legacy, 'lang');
+        if (!hasSavedLanguage) {
+          const browserLanguage = (navigator.languages?.[0] || navigator.language || 'ar').toLowerCase();
+          const lang = browserLanguage.startsWith('en') ? 'en' : 'ar';
+          localStorage.setItem(key, JSON.stringify({ ...saved, settings: { ...(saved.settings || {}), lang } }));
+        }
+      } catch { /* Continue with the app default if storage or locale data is unavailable. */ }
+    </script>
   </head>
   <body>
     <div id="root"></div>

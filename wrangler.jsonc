@@ -4,7 +4,7 @@
   "main": "worker.js",
   "compatibility_date": "2025-04-08",
   "ai": {
-    "binding": "MY_BINDING"
+    "binding": "AI"
   },
   "assets": {
     "directory": "./dist",
