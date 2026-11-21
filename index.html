@@ -19,7 +19,6 @@
     <link rel="apple-touch-icon" href="/logo.png" />
     <title>ذكاء بلس | Zaka+</title>
     <script>
-      // Pick the browser language only once; any saved or legacy user choice takes precedence.
       try {
         const key = 'zaka-plus-chat-v5';
         const saved = JSON.parse(localStorage.getItem(key) || '{}');
@@ -31,7 +30,7 @@
           const lang = browserLanguage.startsWith('en') ? 'en' : 'ar';
           localStorage.setItem(key, JSON.stringify({ ...saved, settings: { ...(saved.settings || {}), lang } }));
         }
-      } catch { /* Continue with the app default if storage or locale data is unavailable. */ }
+      } catch { /* Continue with defaults if storage is unavailable. */ }
     </script>
   </head>
   <body>

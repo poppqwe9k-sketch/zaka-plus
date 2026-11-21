@@ -1,11 +1,9 @@
-const CACHE_NAME = 'zaka-plus-shell-v1';
+const CACHE_NAME = 'zaka-plus-shell-v2';
 const APP_SHELL = [
   '/',
   '/index.html',
   '/manifest.webmanifest',
-  '/logo.svg',
-  '/pwa-icon.svg',
-  '/pwa-icon-maskable.svg'
+  '/logo.png'
 ];
 
 self.addEventListener('install', (event) => {
@@ -35,7 +33,7 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  if (url.pathname.startsWith('/assets/')) {
+  if (url.pathname.startsWith('/assets/') || url.pathname === '/logo.png' || url.pathname === '/manifest.webmanifest') {
     event.respondWith(caches.match(request).then((cached) => cached || fetch(request).then((response) => {
       if (response.ok) caches.open(CACHE_NAME).then((cache) => cache.put(request, response.clone()));
       return response;

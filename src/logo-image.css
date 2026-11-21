@@ -1,0 +1,11 @@
+/* Replace the legacy SVG-backed logo components with the generated PNG mark. */
+.chat-app img[src="/logo.svg"] {
+  content: url('/logo.png');
+}
+
+.chat-app .welcome-logo {
+  width: 72px;
+  height: 72px;
+  object-fit: contain;
+  border-radius: 16px;
+}

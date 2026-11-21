@@ -3,12 +3,12 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "engines": {
-    "node": ">=18.0.0"
-  },
+  "engines": { "node": ">=18.0.0" },
   "scripts": {
     "dev": "vite",
+    "predev": "node scripts/generate-logo.mjs",
     "build": "vite build --outDir dist --emptyOutDir",
+    "prebuild": "node scripts/generate-logo.mjs",
     "preview": "vite preview --host 0.0.0.0",
     "deploy": "npm run build && wrangler deploy"
   },
