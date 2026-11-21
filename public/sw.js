@@ -1,9 +1,10 @@
-const CACHE_NAME = 'zaka-plus-v2';
+const CACHE_NAME = 'zaka-plus-v4';
+const APP_CACHE_PREFIX = 'zaka-plus-';
 const APP_SHELL = [
   '/',
   '/index.html',
-  '/manifest.json?v=3',
-  '/logo.png?v=3'
+  '/manifest.json?v=4',
+  '/logo.png?v=4'
 ];
 
 self.addEventListener('install', (event) => {
@@ -15,7 +16,7 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys()
       .then((keys) => Promise.all(keys
-        .filter((key) => key.startsWith('zaka-plus-') && key !== CACHE_NAME)
+        .filter((key) => key.startsWith(APP_CACHE_PREFIX) && key !== CACHE_NAME)
         .map((key) => caches.delete(key))))
       .then(() => self.clients.claim())
   );
@@ -39,7 +40,7 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  if (url.pathname.startsWith('/assets/') || url.pathname === '/manifest.json' || url.pathname.endsWith('.png')) {
+  if (url.pathname.startsWith('/assets/') || url.pathname === '/manifest.json' || url.pathname === '/manifest.webmanifest' || url.pathname.endsWith('.png')) {
     event.respondWith(
       caches.match(request).then((cached) => cached || fetch(request).then((response) => {
         if (response.ok) {
