@@ -2,6 +2,7 @@ const GEMINI_MODEL_ID = 'gemini-3.1-flash-lite';
 const GEMINI_MODEL_NAME = 'بلس برو';
 const CLOUDFLARE_MODEL_ID = '@cf/meta/llama-3.3-70b-instruct-fp8-fast';
 const DEEPSEEK_MODEL_ID = 'deepseek-ai/DeepSeek-V4-Pro';
+const DEEPSEEK_FALLBACK_MODEL_ID = 'Qwen/Qwen3-30B-A3B-Instruct-2507';
 const API_VERSION = 'v1beta';
 const MAX_MESSAGES = 10;
 const MAX_MESSAGE_LENGTH = 12000;
@@ -109,27 +110,67 @@ async function runGemini(env, messages, attachments, systemInstruction) {
   }
 }
 
-async function runDeepSeekV4Pro(env, messages, systemInstruction) {
-  const hfToken = typeof env?.HF_TOKEN === 'string' ? env.HF_TOKEN.trim() : '';
-  if (!hfToken) throw new Error('HF_TOKEN غير موجود في متغيرات Cloudflare.');
-  const conversation = systemInstruction ? [{ role: 'system', content: systemInstruction }, ...messages] : messages;
+async function requestDeepSeekCompletion(url, apiKey, model, messages) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
-    const response = await fetch('https://router.huggingface.co/v1/chat/completions', {
+    const response = await fetch(url, {
       method: 'POST',
-      headers: { 'Authorization': `Bearer ${hfToken}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: DEEPSEEK_MODEL_ID, messages: conversation, stream: false }),
+      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model, messages, stream: false }),
       signal: controller.signal
     });
     const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(data?.error?.message || `خطأ من DeepSeek (HTTP ${response.status}).`);
+    if (!response.ok) {
+      const error = new Error(data?.error?.message || `خطأ من DeepSeek (HTTP ${response.status}).`);
+      error.status = response.status;
+      throw error;
+    }
     const reply = typeof data?.choices?.[0]?.message?.content === 'string' ? data.choices[0].message.content.trim() : '';
-    if (!reply) throw new Error('لم يُرجع DeepSeek-V4-Pro إجابة نصية.');
+    if (!reply) throw new Error('لم يُرجع مزود DeepSeek إجابة نصية.');
     return reply;
   } finally {
     clearTimeout(timer);
   }
+}
+
+async function runDeepSeekV4Pro(env, messages, systemInstruction) {
+  const hfToken = typeof env?.HF_TOKEN === 'string' ? env.HF_TOKEN.trim() : '';
+  const deepseekApiKey = typeof env?.DEEPSEEK_API_KEY === 'string' ? env.DEEPSEEK_API_KEY.trim() : '';
+  const conversation = systemInstruction ? [{ role: 'system', content: systemInstruction }, ...messages] : messages;
+
+  if (deepseekApiKey) {
+    try {
+      const reply = await requestDeepSeekCompletion('https://api.deepseek.com/chat/completions', deepseekApiKey, 'deepseek-chat', conversation);
+      return { reply, model: 'deepseek-chat', modelName: 'DeepSeek' };
+    } catch (error) {
+      if (error?.status !== 402) throw error;
+      // A paid-service/billing response can be routed to an alternate provider below.
+    }
+  }
+
+  if (hfToken) {
+    try {
+      const reply = await requestDeepSeekCompletion('https://router.huggingface.co/v1/chat/completions', hfToken, DEEPSEEK_MODEL_ID, conversation);
+      return { reply, model: DEEPSEEK_MODEL_ID, modelName: 'DeepSeek-V4-Pro' };
+    } catch (error) {
+      if (error?.status !== 402) throw error;
+      try {
+        const reply = await requestDeepSeekCompletion('https://router.huggingface.co/v1/chat/completions', hfToken, DEEPSEEK_FALLBACK_MODEL_ID, conversation);
+        return { reply, model: DEEPSEEK_FALLBACK_MODEL_ID, modelName: 'Qwen3' };
+      } catch (fallbackError) {
+        if (fallbackError?.status !== 402) throw fallbackError;
+      }
+    }
+  }
+
+  if (typeof env?.AI?.run === 'function') {
+    const reply = await runWorkersAI(env, messages, systemInstruction);
+    return { reply, model: CLOUDFLARE_MODEL_ID, modelName: 'Cloudflare Workers AI' };
+  }
+
+  if (!deepseekApiKey && !hfToken) throw new Error('أضف DEEPSEEK_API_KEY أو HF_TOKEN، أو فعّل ربط Cloudflare Workers AI (AI).');
+  throw new Error('تعذر استخدام DeepSeek بسبب HTTP 402، ولم يتوفر مسار بديل. أضف DEEPSEEK_API_KEY أو فعّل Workers AI.');
 }
 
 async function handleChat(request, env) {
@@ -151,11 +192,11 @@ async function handleChat(request, env) {
 
   if (selectedModel === 'deepseek-v4-pro') {
     try {
-      const reply = await runDeepSeekV4Pro(env, validation.messages, systemInstruction);
-      return json({ reply, model: DEEPSEEK_MODEL_ID, modelName: 'DeepSeek-V4-Pro' });
+      const result = await runDeepSeekV4Pro(env, validation.messages, systemInstruction);
+      return json({ reply: result.reply, model: result.model, modelName: result.modelName });
     } catch (error) {
       const timedOut = error?.name === 'AbortError';
-      return json({ error: timedOut ? 'انتهت مهلة الاتصال بـ DeepSeek-V4-Pro. أعد المحاولة.' : (error instanceof Error ? error.message : 'تعذر الاتصال بـ DeepSeek-V4-Pro.') }, timedOut ? 504 : 502);
+      return json({ error: timedOut ? 'انتهت مهلة الاتصال بـ DeepSeek-V4-Pro. أعد المحاولة.' : (error instanceof Error ? error.message : 'تعذر الاتصال بـ DeepSeek-V4-Pro.'), model: DEEPSEEK_MODEL_ID, modelName: 'DeepSeek-V4-Pro' }, timedOut ? 504 : 502);
     }
   }
 
