@@ -38,12 +38,13 @@
       try {
         if ('caches' in window) {
           caches.delete('zaka-plus-v5').catch(() => {});
+          caches.delete('zaka-plus-v6').catch(() => {});
         }
         if ('serviceWorker' in navigator) {
           const hadController = Boolean(navigator.serviceWorker.controller);
           navigator.serviceWorker.addEventListener('controllerchange', () => {
-            if (hadController && !sessionStorage.getItem('zaka-sw-reloaded-v6')) {
-              sessionStorage.setItem('zaka-sw-reloaded-v6', '1');
+            if (hadController && !sessionStorage.getItem('zaka-sw-reloaded-v7')) {
+              sessionStorage.setItem('zaka-sw-reloaded-v7', '1');
               window.location.reload();
             }
           });

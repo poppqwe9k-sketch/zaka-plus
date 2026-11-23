@@ -1,4 +1,4 @@
-const CACHE_NAME = 'zaka-plus-v6';
+const CACHE_NAME = 'zaka-plus-v7';
 const APP_CACHE_PREFIX = 'zaka-plus-';
 const APP_SHELL = [
   '/',

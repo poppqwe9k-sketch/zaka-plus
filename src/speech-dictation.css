@@ -1,0 +1,127 @@
+/* Web Speech API dictation button & live listening indicator */
+.mic-button {
+  width: 42px;
+  height: 42px;
+  flex: 0 0 42px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  color: var(--text);
+  background: var(--surface-raised);
+  transition: transform .16s ease, background .16s ease, border-color .16s ease, color .16s ease, box-shadow .16s ease;
+}
+
+.mic-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: #9b91f1;
+  background: var(--surface-hover);
+}
+
+.mic-button-active {
+  border-color: #e11d48;
+  color: #fff;
+  background: #e11d48;
+  box-shadow: 0 0 0 4px #e11d4829, 0 6px 16px #e11d4838;
+  animation: mic-pulse 1.5s ease-in-out infinite;
+}
+
+.mic-button-active:hover:not(:disabled) {
+  border-color: #be123c;
+  color: #fff;
+  background: #be123c;
+}
+
+.mic-button-unsupported {
+  opacity: .72;
+}
+
+@keyframes mic-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 2px #e11d4833, 0 4px 14px #e11d4833;
+  }
+  50% {
+    box-shadow: 0 0 0 6px #e11d481a, 0 6px 18px #e11d484d;
+  }
+}
+
+.voice-listening-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+  padding: 7px 12px;
+  border: 1px solid #e11d4840;
+  border-radius: 12px;
+  color: #be123c;
+  background: #fff1f2;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.chat-dark .voice-listening-bar {
+  border-color: #fb718548;
+  color: #fda4af;
+  background: #3b131d;
+}
+
+.voice-listening-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.voice-listening-dot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: #e11d48;
+  animation: voice-dot-blink 1s ease-in-out infinite;
+}
+
+@keyframes voice-dot-blink {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: .45;
+    transform: scale(.82);
+  }
+}
+
+.voice-stop-pill {
+  min-height: 28px;
+  padding: 3px 10px;
+  border: 1px solid currentColor;
+  border-radius: 8px;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.voice-stop-pill:hover {
+  background: #e11d4816;
+}
+
+@media (max-width: 600px) {
+  .mic-button {
+    width: 39px;
+    height: 39px;
+    flex-basis: 39px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mic-button,
+  .mic-button-active,
+  .voice-listening-dot {
+    animation: none !important;
+    transition-duration: .01ms !important;
+  }
+}

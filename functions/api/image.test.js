@@ -69,3 +69,64 @@ test('keeps non-Arabic prompts intact with quality suffix without needing MyMemo
   assert.equal(fetchCalled, false);
   assert.equal(result.englishPrompt, 'A futuristic city at sunset, wide angle shot, high quality, detailed');
 });
+
+test('POST /api/image rotates across GEMINI_KEY_1..GEMINI_KEY_13 for prompt translation and falls back to MyMemory if needed', async () => {
+  const { resetKeyRotationForTests } = await import('../lib/geminiKeys.js');
+  resetKeyRotationForTests();
+
+  const env = {};
+  for (let i = 1; i <= 13; i += 1) {
+    env[`GEMINI_KEY_${i}`] = `img-key-${i}`;
+  }
+
+  const usedKeys = [];
+  const req1 = new Request('http://localhost:3000/api/image', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt: 'صمم لي صورة 10 أشخاص' })
+  });
+
+  const res1 = await onRequestPost({
+    request: req1,
+    env,
+    seed: 1234,
+    generateFn: async ({ apiKey }) => {
+      usedKeys.push(apiKey);
+      if (apiKey === 'img-key-1') {
+        const err = new Error('429 quota');
+        err.status = 429;
+        throw err;
+      }
+      return { text: 'A detailed wide photograph of 10 diverse people standing together' };
+    }
+  });
+
+  assert.equal(res1.status, 200);
+  const body1 = await res1.json();
+  assert.deepEqual(usedKeys, ['img-key-1', 'img-key-2']);
+  assert.equal(
+    body1.englishPrompt,
+    'A detailed wide photograph of 10 diverse people standing together, wide angle shot, high quality, detailed'
+  );
+
+  // Next request continues rotation cleanly from next healthy key
+  const req2 = new Request('http://localhost:3000/api/image', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt: 'قمر مكتمل' })
+  });
+
+  let secondCallKey = '';
+  const res2 = await onRequestPost({
+    request: req2,
+    env,
+    seed: 5678,
+    generateFn: async ({ apiKey }) => {
+      secondCallKey = apiKey;
+      return { text: 'A glowing full moon over calm dark ocean' };
+    }
+  });
+
+  assert.equal(res2.status, 200);
+  assert.equal(secondCallKey, 'img-key-3');
+});

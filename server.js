@@ -3,6 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { onRequestPost as onChatPost } from './functions/api/chat.js';
 import { onRequestPost as onImagePost } from './functions/api/image.js';
+import { onRequestGet as onQuotaGet } from './functions/api/quota.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT) || 3000;
@@ -15,6 +16,12 @@ app.use(['/sw.js', '/service-worker.js'], (_req, res, next) => {
   next();
 });
 
+let devFileEnv = {};
+
+function getServerEnv() {
+  return { ...devFileEnv, ...process.env };
+}
+
 function mountFunctionHandler(routePath, handler) {
   app.all(routePath, async (req, res) => {
     try {
@@ -23,6 +30,8 @@ function mountFunctionHandler(routePath, handler) {
       const url = new URL(req.originalUrl, `${protocol}://${host}`);
       const headers = new Headers();
       for (const [key, value] of Object.entries(req.headers)) {
+        const lower = key.toLowerCase();
+        if (lower === 'content-length' || lower === 'transfer-encoding' || lower === 'host') continue;
         if (typeof value === 'string') headers.set(key, value);
         else if (Array.isArray(value)) headers.set(key, value.join(', '));
       }
@@ -34,7 +43,7 @@ function mountFunctionHandler(routePath, handler) {
         body: hasBody ? JSON.stringify(req.body ?? {}) : undefined
       });
 
-      const webResponse = await handler({ request: webRequest, env: process.env });
+      const webResponse = await handler({ request: webRequest, env: getServerEnv() });
       res.status(webResponse.status);
       webResponse.headers.forEach((value, key) => {
         res.setHeader(key, value);
@@ -51,15 +60,17 @@ function mountFunctionHandler(routePath, handler) {
 
 mountFunctionHandler('/api/chat', onChatPost);
 mountFunctionHandler('/api/image', onImagePost);
+mountFunctionHandler('/api/quota', onQuotaGet);
 
 if (isProduction) {
   const distDir = path.resolve(__dirname, 'dist');
   app.use(express.static(distDir));
-  app.get('*', (_req, res) => {
+  app.use((_req, res) => {
     res.sendFile(path.join(distDir, 'index.html'));
   });
 } else {
-  const { createServer: createViteServer } = await import('vite');
+  const { createServer: createViteServer, loadEnv } = await import('vite');
+  devFileEnv = loadEnv('development', __dirname, '');
   const vite = await createViteServer({
     server: { middlewareMode: true },
     appType: 'spa'

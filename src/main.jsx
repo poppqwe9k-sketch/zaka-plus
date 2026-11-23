@@ -96,7 +96,7 @@ installSidebarEnhancements();
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js?v=6')
+    navigator.serviceWorker.register('/sw.js?v=7')
       .then((reg) => reg.update().catch(() => {}))
       .catch((error) => {
         console.error('Service worker registration failed:', error);

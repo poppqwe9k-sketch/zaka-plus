@@ -192,5 +192,71 @@
   background: var(--surface-hover);
 }
 
+.daily-quota-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 35px;
+  max-width: 100%;
+  margin-inline-start: auto;
+  padding: 5px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  background: var(--surface);
+  font-size: 12px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.4;
+}
+
+.daily-quota-dot {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: #39a879;
+}
+
+.daily-quota-low {
+  border-color: #d9822b66;
+  color: #9a5b13;
+  background: #fff8eb;
+}
+
+.daily-quota-low .daily-quota-dot {
+  background: #d9822b;
+}
+
+.daily-quota-empty {
+  border-color: #e2a2a2;
+  color: #a12626;
+  background: #fff3f3;
+}
+
+.daily-quota-empty .daily-quota-dot {
+  background: #d92d20;
+}
+
+.chat-dark .daily-quota-low {
+  border-color: #d9822b66;
+  color: #ffd584;
+  background: #2b2314;
+}
+
+.chat-dark .daily-quota-empty {
+  border-color: #60383d;
+  color: #ffb4ad;
+  background: #321f22;
+}
+
+@media (max-width: 600px) {
+  .daily-quota-status {
+    margin-inline-start: 0;
+    font-size: 11px;
+  }
+}
+
+
 
 

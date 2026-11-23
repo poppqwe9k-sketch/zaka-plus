@@ -3,12 +3,9 @@ import './chat-redesign.css';
 import './chat-features.css';
 import './settings.css';
 import './image-generation.css';
-import './credits-admob.css';
+import './speech-dictation.css';
 import { enableChatAutoScroll, scrollToBottom } from './chat-scroll.js';
-import {
-  MODEL_TIERS,
-  getModelTier
-} from './shared/modelTiers.js';
+import { GEMINI_HYDROGEN_MODEL_ID } from './shared/modelTiers.js';
 import {
   LANGUAGES,
   getLanguageMeta,
@@ -29,18 +26,19 @@ import {
   isImageGenerationRequest
 } from './utils/imagePrompt.js';
 import {
-  REWARD_CREDITS_AMOUNT,
-  consumeOneCredit,
-  grantRewardCredits,
-  isCreditRequiredAction,
-  loadCreditsState,
-  saveCreditsState
-} from './utils/credits.js';
+  extractSpeechTranscript,
+  getSpeechRecognitionConstructor,
+  mapSpeechErrorToKey,
+  mergeDictatedText,
+  resolveSpeechLocale
+} from './utils/speechDictation.js';
 import {
-  isNativeAdMobAvailable,
-  showNativeRewardedAd
-} from './utils/admobRewarded.js';
-import RewardAdModal from './components/RewardAdModal.jsx';
+  applyMessageSendQuota,
+  formatDailyQuotaText,
+  loadDailyQuotaState,
+  reconcileQuotaState,
+  saveDailyQuotaState
+} from './utils/dailyQuota.js';
 
 const MAX_ATTACHMENT_BYTES = 7 * 1024 * 1024;
 const MAX_ATTACHMENTS = 4;
@@ -133,6 +131,23 @@ function DownloadIcon() {
   );
 }
 
+function MicIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <rect x="9" y="2" width="6" height="12" rx="3" />
+      <path d="M5 10a7 7 0 0 0 14 0M12 17v5M8 22h8" />
+    </svg>
+  );
+}
+
+function StopMicIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <rect x="6.5" y="6.5" width="11" height="11" rx="2.5" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
 export default function App() {
   const initialLocal = useMemo(() => readLocalStorageState(), []);
   const [chats, setChats] = useState(initialLocal.chats);
@@ -151,14 +166,24 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [imageMode, setImageMode] = useState(false);
   const [historyQuery, setHistoryQuery] = useState('');
-  const [creditsState, setCreditsState] = useState(() => loadCreditsState());
-  const [rewardModalOpen, setRewardModalOpen] = useState(false);
-  const [adLoading, setAdLoading] = useState(false);
-  const [highlightRewardBanner, setHighlightRewardBanner] = useState(false);
+  const [isListening, setIsListening] = useState(false);
+  const [dailyQuota, setDailyQuota] = useState(() => {
+    const saved = loadDailyQuotaState();
+    return saved ? reconcileQuotaState(saved, {}) : null;
+  });
 
   const imageInputRef = useRef(null);
   const pdfInputRef = useRef(null);
   const composerRef = useRef(null);
+  const messageInputRef = useRef(null);
+  const recognitionRef = useRef(null);
+  const voiceBaseTextRef = useRef('');
+  const voiceFinalTextRef = useRef('');
+  const voiceLatestTextRef = useRef('');
+
+  const isSpeechSupported = Boolean(
+    getSpeechRecognitionConstructor(typeof window !== 'undefined' ? window : null)
+  );
 
   const langMeta = getLanguageMeta(settings.lang);
   const t = getTranslation(langMeta.code);
@@ -168,10 +193,6 @@ export default function App() {
     [chats, historyQuery]
   );
   const messages = activeChat?.messages || [];
-  const activeTier = getModelTier(settings.selectedModel);
-  const tierCopy = t.tiers?.[activeTier.id] || {};
-  const activeTierLabel = tierCopy.label || (langMeta.code === 'ar' ? activeTier.labelAr : activeTier.labelEn);
-  const activeTierDesc = tierCopy.desc || (langMeta.code === 'ar' ? activeTier.shortDescAr : activeTier.shortDescEn);
 
   useEffect(() => {
     let cancelled = false;
@@ -221,6 +242,57 @@ export default function App() {
     saveOfflineState({ chats, activeChatId, settings });
   }, [chats, activeChatId, settings, storageReady]);
 
+  const syncServerQuota = useCallback(async () => {
+    try {
+      const response = await fetch('/api/quota', { cache: 'no-store' });
+      if (!response.ok) return;
+      const serverMeta = await response.json().catch(() => null);
+      if (!serverMeta || typeof serverMeta.validKeyCount !== 'number') return;
+      setDailyQuota((prev) => {
+        const next = reconcileQuotaState(prev || loadDailyQuotaState(), serverMeta, Date.now());
+        saveDailyQuotaState(next);
+        return next;
+      });
+    } catch {
+      setDailyQuota((prev) => {
+        const base = prev || loadDailyQuotaState();
+        if (!base) return prev;
+        const next = reconcileQuotaState(base, {}, Date.now());
+        saveDailyQuotaState(next);
+        return next;
+      });
+    }
+  }, []);
+
+  useEffect(() => {
+    syncServerQuota();
+    const intervalId = window.setInterval(() => {
+      setDailyQuota((prev) => {
+        if (!prev) return prev;
+        const next = reconcileQuotaState(prev, {}, Date.now());
+        if (next.cycleStartedAt !== prev.cycleStartedAt || next.remaining !== prev.remaining) {
+          saveDailyQuotaState(next);
+          return next;
+        }
+        return prev;
+      });
+    }, 30000);
+
+    const handleVisibilityOrFocus = () => {
+      if (typeof document === 'undefined' || document.visibilityState !== 'hidden') {
+        syncServerQuota();
+      }
+    };
+
+    window.addEventListener('focus', handleVisibilityOrFocus);
+    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener('focus', handleVisibilityOrFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
+    };
+  }, [syncServerQuota]);
+
   useEffect(() => enableChatAutoScroll(), []);
 
   useEffect(() => {
@@ -255,38 +327,103 @@ export default function App() {
     return () => window.removeEventListener('zaka-chat-rename', handleExternalRename);
   }, []);
 
-  useEffect(() => {
-    saveCreditsState(creditsState);
-  }, [creditsState]);
-
-  const handleRewardEarned = useCallback(() => {
-    setCreditsState((prev) => grantRewardCredits(prev, REWARD_CREDITS_AMOUNT));
-    setError('');
-    setHighlightRewardBanner(false);
+  const stopVoiceDictation = useCallback((abortImmediately = false) => {
+    const recognition = recognitionRef.current;
+    if (recognition) {
+      recognition.onresult = null;
+      recognition.onerror = null;
+      recognition.onend = null;
+      try {
+        if (abortImmediately && typeof recognition.abort === 'function') {
+          recognition.abort();
+        } else if (typeof recognition.stop === 'function') {
+          recognition.stop();
+        }
+      } catch {
+        // Ignore stop errors on already-ended recognition sessions.
+      }
+      recognitionRef.current = null;
+    }
+    setIsListening(false);
   }, []);
 
-  async function handleWatchRewardedAd() {
-    if (adLoading) return;
-    setError('');
+  useEffect(() => {
+    return () => {
+      stopVoiceDictation(true);
+    };
+  }, [stopVoiceDictation]);
 
-    if (isNativeAdMobAvailable()) {
-      setAdLoading(true);
-      try {
-        const result = await showNativeRewardedAd();
-        if (result.rewarded) {
-          handleRewardEarned();
-        } else {
-          setError(t.rewardAdIncompleteError);
-        }
-      } catch (err) {
-        setError(err instanceof Error && err.message ? err.message : t.rewardAdLoadError);
-      } finally {
-        setAdLoading(false);
-      }
+  useEffect(() => {
+    if (isListening) {
+      stopVoiceDictation(true);
+    }
+  }, [langMeta.code]);
+
+  function handleToggleVoiceDictation() {
+    if (isListening) {
+      const committed = voiceLatestTextRef.current || mergeDictatedText(voiceBaseTextRef.current, voiceFinalTextRef.current, '');
+      stopVoiceDictation(false);
+      setInput(committed);
+      voiceBaseTextRef.current = committed;
+      messageInputRef.current?.focus();
       return;
     }
 
-    setRewardModalOpen(true);
+    const SpeechRecognitionCtor = getSpeechRecognitionConstructor(
+      typeof window !== 'undefined' ? window : null
+    );
+    if (!SpeechRecognitionCtor) {
+      setError(t.voiceUnsupported);
+      return;
+    }
+
+    setError('');
+    voiceBaseTextRef.current = input;
+    voiceFinalTextRef.current = '';
+    voiceLatestTextRef.current = input;
+
+    try {
+      const recognition = new SpeechRecognitionCtor();
+      recognition.lang = resolveSpeechLocale(langMeta.code);
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.maxAlternatives = 1;
+
+      recognition.onresult = (event) => {
+        const { finalText, interimText } = extractSpeechTranscript(event?.results);
+        voiceFinalTextRef.current = finalText;
+        const nextValue = mergeDictatedText(voiceBaseTextRef.current, finalText, interimText);
+        voiceLatestTextRef.current = nextValue;
+        setInput(nextValue);
+      };
+
+      recognition.onerror = (event) => {
+        const errKey = mapSpeechErrorToKey(event?.error);
+        if (errKey && t[errKey]) {
+          setError(t[errKey]);
+        }
+        stopVoiceDictation(true);
+      };
+
+      recognition.onend = () => {
+        if (recognitionRef.current === recognition) {
+          recognitionRef.current = null;
+          setIsListening(false);
+          const finalized = mergeDictatedText(voiceBaseTextRef.current, voiceFinalTextRef.current, '');
+          if (finalized !== voiceBaseTextRef.current) {
+            setInput(finalized);
+          }
+        }
+      };
+
+      recognitionRef.current = recognition;
+      setIsListening(true);
+      recognition.start();
+    } catch {
+      recognitionRef.current = null;
+      setIsListening(false);
+      setError(t.voiceGenericError);
+    }
   }
 
   function updateSetting(key, value) {
@@ -404,6 +541,9 @@ export default function App() {
 
   async function handleSubmit(event) {
     event.preventDefault();
+    if (isListening) {
+      stopVoiceDictation(true);
+    }
     const trimmed = input.trim();
     if ((!trimmed && attachments.length === 0) || isSending) return;
 
@@ -414,16 +554,6 @@ export default function App() {
     }
 
     const wantsImage = imageMode || (trimmed && isImageGenerationRequest(trimmed));
-    const requiresCredit = isCreditRequiredAction({
-      wantsImage,
-      selectedModel: settings.selectedModel
-    });
-
-    if (requiresCredit && creditsState.remaining <= 0) {
-      setHighlightRewardBanner(true);
-      window.setTimeout(() => setHighlightRewardBanner(false), 1800);
-      return;
-    }
 
     const userText = trimmed || '📎';
     const now = Date.now();
@@ -486,8 +616,7 @@ export default function App() {
         imageLoading: true,
         imageError: false,
         imageErrorMessage: '',
-        createdAt: Date.now(),
-        modelName: 'Pollinations · Flux'
+        createdAt: Date.now()
       };
 
       setChats((prev) =>
@@ -500,7 +629,6 @@ export default function App() {
 
       try {
         const result = await generateImageViaApi(trimmed);
-        setCreditsState((prev) => consumeOneCredit(prev));
         updateMessageInChat(targetChatId, imageMessageId, (m) => ({
           ...m,
           englishPrompt: result.englishPrompt,
@@ -508,8 +636,7 @@ export default function App() {
           imageSeed: result.seed,
           imageModel: result.model || 'flux',
           imageError: false,
-          imageErrorMessage: '',
-          modelName: 'Pollinations · Flux'
+          imageErrorMessage: ''
         }));
         scrollToBottom();
       } catch (err) {
@@ -537,26 +664,66 @@ export default function App() {
           messages: historyPayload,
           attachments: outgoingAttachments.length ? outgoingAttachments : undefined,
           systemInstruction: settings.systemInstruction.trim() || undefined,
-          selectedModel: settings.selectedModel,
+          model: GEMINI_HYDROGEN_MODEL_ID,
           deepThinking: settings.deepThinking
         })
       });
 
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(data?.error || `${t.genericError} (HTTP ${response.status})`);
+      const rawText = await response.text();
+      let data = {};
+      try {
+        data = rawText ? JSON.parse(rawText) : {};
+      } catch {
+        data = {};
       }
 
-      const replyModelName = tierCopy.label
-        || (langMeta.code === 'ar' ? (data.modelName || activeTier.labelAr) : (data.modelNameEn || activeTier.labelEn));
+      const readableRaw = rawText
+        ? rawText.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 260)
+        : '';
+
+      if (!response.ok) {
+        if (data?.quotaMeta && typeof data.quotaMeta === 'object') {
+          setDailyQuota((prev) => {
+            const base = prev || loadDailyQuotaState();
+            const next = applyMessageSendQuota(base, {
+              ...data.quotaMeta,
+              succeeded: false
+            }, Date.now());
+            saveDailyQuotaState(next);
+            return next;
+          });
+        }
+        const serverErr = data?.error || data?.message || readableRaw;
+        throw new Error(
+          serverErr
+            ? `${serverErr}${response.status ? ` [HTTP ${response.status}]` : ''}`
+            : `HTTP ${response.status} ${response.statusText || ''}`.trim()
+        );
+      }
+
+      const replyText = typeof data?.reply === 'string'
+        ? data.reply.trim()
+        : (typeof data?.text === 'string' ? data.text.trim() : '');
+      if (!replyText) {
+        const detail = data?.error || data?.message || readableRaw || `HTTP ${response.status}: Empty response`;
+        throw new Error(detail);
+      }
+
+      const successQuotaMeta = data?.quotaMeta && typeof data.quotaMeta === 'object'
+        ? { ...data.quotaMeta, reachedModel: true, succeeded: true }
+        : { reachedModel: true, succeeded: true };
+      setDailyQuota((prev) => {
+        const base = prev || loadDailyQuotaState();
+        const next = applyMessageSendQuota(base, successQuotaMeta, Date.now());
+        saveDailyQuotaState(next);
+        return next;
+      });
 
       const assistantMessage = {
         id: createId('msg'),
         role: 'assistant',
-        content: typeof data.reply === 'string' ? data.reply : '',
-        createdAt: Date.now(),
-        modelName: replyModelName,
-        tierId: data.tierId || activeTier.id
+        content: replyText,
+        createdAt: Date.now()
       };
 
       setChats((prev) =>
@@ -566,12 +733,8 @@ export default function App() {
             : chat
         )
       );
-
-      if (requiresCredit) {
-        setCreditsState((prev) => consumeOneCredit(prev));
-      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : t.genericError);
+      setError(err instanceof Error && err.message ? err.message : String(err || 'Request failed'));
     } finally {
       setIsSending(false);
     }
@@ -607,8 +770,7 @@ export default function App() {
         ...m,
         imageModel: 'turbo',
         imageSeed: retrySeed,
-        imageUrl: fallbackUrl,
-        modelName: 'Pollinations · Turbo'
+        imageUrl: fallbackUrl
       }));
       return;
     }
@@ -728,7 +890,7 @@ export default function App() {
           </button>
           <span
             className={`model-status-dot ${isOnline ? '' : 'status-dot-offline'}`}
-            title={isOnline ? activeTierLabel : t.offlineBanner}
+            title={isOnline ? t.assistantLabel : t.offlineBanner}
           />
         </div>
       </aside>
@@ -772,14 +934,12 @@ export default function App() {
               <img className="welcome-logo" src="/logo.svg" alt="Zaka+" />
               <h1>{t.welcomeTitle}</h1>
               <p>{t.welcomeSubtitle}</p>
-              <div className="welcome-model">
-                {t.modelBadge}: {activeTierLabel}
-              </div>
-              <p className="welcome-tier-desc">{activeTierDesc}</p>
             </div>
           ) : (
             <div className="message-list">
-              {messages.map((msg) => (
+              {messages
+                .filter((msg) => msg.type === 'image' || Boolean(msg.content?.trim()) || (Array.isArray(msg.attachments) && msg.attachments.length > 0))
+                .map((msg) => (
                 <div
                   key={msg.id}
                   className={`message-row ${msg.role === 'user' ? 'message-user' : 'message-assistant'}`}
@@ -790,7 +950,6 @@ export default function App() {
                   <div className="message-bubble">
                     <div className="message-author">
                       {msg.role === 'user' ? t.userLabel : t.assistantLabel}
-                      {msg.modelName ? ` · ${msg.modelName}` : ''}
                     </div>
                     {Array.isArray(msg.attachments) && msg.attachments.length > 0 && (
                       <div className="message-attachments">
@@ -846,7 +1005,7 @@ export default function App() {
                 <div className="message-row message-assistant">
                   <img className="message-avatar" src="/logo.svg" alt="Zaka+" width="30" height="30" />
                   <div className="message-bubble typing-bubble">
-                    <div className="message-author">{t.assistantLabel} · {activeTierLabel}</div>
+                    <div className="message-author">{t.assistantLabel}</div>
                     <div className="typing-indicator" aria-label="Typing">
                       <i />
                       <i />
@@ -863,30 +1022,6 @@ export default function App() {
           {error && (
             <div className="chat-error" role="alert">
               {error}
-            </div>
-          )}
-
-          {creditsState.remaining <= 0 && (
-            <div
-              className={`reward-ad-banner ${highlightRewardBanner ? 'reward-ad-banner-highlight' : ''}`}
-              role="region"
-              aria-label={t.creditsExhaustedTitle}
-            >
-              <div className="reward-ad-copy">
-                <div className="reward-ad-title">{t.creditsExhaustedTitle}</div>
-                <div className="reward-ad-desc">{t.creditsExhaustedDesc}</div>
-              </div>
-              <button
-                type="button"
-                className="reward-ad-button"
-                onClick={handleWatchRewardedAd}
-                disabled={adLoading}
-              >
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <polygon points="6 4 20 12 6 20 6 4" />
-                </svg>
-                <span>{adLoading ? t.watchRewardedAdLoading : t.watchRewardedAdButton}</span>
-              </button>
             </div>
           )}
 
@@ -934,32 +1069,38 @@ export default function App() {
               {t.imageMode}
             </button>
 
-            <div className="model-select-wrap">
-              <span className="model-select-label">{t.modelLabel}:</span>
-              <select
-                value={settings.selectedModel}
-                onChange={(e) => updateSetting('selectedModel', e.target.value)}
-                aria-label={t.modelLabel}
+            {dailyQuota && (
+              <div
+                className={`daily-quota-status ${dailyQuota.remaining === 0 ? 'daily-quota-empty' : (dailyQuota.remaining <= 10 ? 'daily-quota-low' : '')}`}
+                data-testid="daily-quota-counter"
+                role="status"
+                aria-live="polite"
               >
-                {MODEL_TIERS.map((tier) => (
-                  <option key={tier.id} value={tier.id}>
-                    {t.tiers?.[tier.id]?.label || (langMeta.code === 'ar' ? tier.labelAr : tier.labelEn)}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <span className={`credits-inline-meta ${creditsState.remaining <= 0 ? 'credits-inline-empty' : ''}`}>
-              <span>{t.creditsRemainingLabel}:</span>
-              <strong>{creditsState.remaining}</strong>
-              <span aria-hidden="true">·</span>
-              <span>{t.creditsScopeLabel}</span>
-            </span>
+                <span className="daily-quota-dot" aria-hidden="true" />
+                <span>{formatDailyQuotaText(dailyQuota.remaining, langMeta.code)}</span>
+              </div>
+            )}
 
             {settings.deepThinking && (
               <span className="thinking-hint">{t.deepThinkingHint}</span>
             )}
           </div>
+
+          {isListening && (
+            <div className="voice-listening-bar" role="status" aria-live="polite">
+              <span className="voice-listening-status">
+                <span className="voice-listening-dot" aria-hidden="true" />
+                <span>{t.voiceListening}</span>
+              </span>
+              <button
+                type="button"
+                className="voice-stop-pill"
+                onClick={handleToggleVoiceDictation}
+              >
+                {t.voiceStop}
+              </button>
+            </div>
+          )}
 
           <form ref={composerRef} className="message-composer" onSubmit={handleSubmit}>
             <div className="attachment-menu-wrap">
@@ -1004,10 +1145,17 @@ export default function App() {
             </div>
 
             <textarea
+              ref={messageInputRef}
               className="message-input"
               rows={1}
               value={input}
-              onChange={(e) => setInput(e.target.value)}
+              onChange={(e) => {
+                const next = e.target.value;
+                setInput(next);
+                if (!isListening) {
+                  voiceBaseTextRef.current = next;
+                }
+              }}
               onKeyDown={handleKeyDown}
               placeholder={
                 !isOnline
@@ -1015,6 +1163,18 @@ export default function App() {
                   : (imageMode ? t.imagePlaceholder : t.placeholder)
               }
             />
+
+            <button
+              type="button"
+              className={`ui-icon-button mic-button ${isListening ? 'mic-button-active' : ''} ${!isSpeechSupported ? 'mic-button-unsupported' : ''}`}
+              onClick={handleToggleVoiceDictation}
+              disabled={isSending}
+              aria-pressed={isListening}
+              aria-label={isListening ? t.voiceStop : t.voiceStart}
+              title={isSpeechSupported ? (isListening ? t.voiceStop : t.voiceStart) : t.voiceUnsupported}
+            >
+              {isListening ? <StopMicIcon /> : <MicIcon />}
+            </button>
 
             <button
               type="submit"
@@ -1091,23 +1251,6 @@ export default function App() {
 
               <div className="settings-section">
                 <h3>{t.modelSection}</h3>
-                <div className="settings-row">
-                  <div>
-                    <div className="settings-item-title">{t.defaultModelLabel}</div>
-                    <small>{activeTierDesc}</small>
-                  </div>
-                  <select
-                    value={settings.selectedModel}
-                    onChange={(e) => updateSetting('selectedModel', e.target.value)}
-                  >
-                    {MODEL_TIERS.map((tier) => (
-                      <option key={tier.id} value={tier.id}>
-                        {t.tiers?.[tier.id]?.label || (langMeta.code === 'ar' ? tier.labelAr : tier.labelEn)}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
                 <div className="settings-column">
                   <label htmlFor="zaka-system-instruction">{t.systemInstructionLabel}</label>
                   <small>{t.systemInstructionDesc}</small>
@@ -1117,29 +1260,6 @@ export default function App() {
                     onChange={(e) => updateSetting('systemInstruction', e.target.value)}
                     placeholder={t.systemInstructionPlaceholder}
                   />
-                </div>
-              </div>
-
-              <div className="settings-section">
-                <h3>{t.creditsSection}</h3>
-                <div className="settings-row">
-                  <div>
-                    <div className="settings-item-title">
-                      {t.creditsSettingsTitle}: <strong>{creditsState.remaining}</strong>
-                    </div>
-                    <small>{t.creditsSettingsDesc}</small>
-                  </div>
-                  <button
-                    type="button"
-                    className="settings-reward-btn"
-                    onClick={() => {
-                      setSettingsOpen(false);
-                      handleWatchRewardedAd();
-                    }}
-                    disabled={adLoading}
-                  >
-                    {adLoading ? t.watchRewardedAdLoading : t.creditsSettingsWatchBtn}
-                  </button>
                 </div>
               </div>
 
@@ -1167,13 +1287,6 @@ export default function App() {
           </div>
         </div>
       )}
-
-      <RewardAdModal
-        open={rewardModalOpen}
-        onClose={() => setRewardModalOpen(false)}
-        onRewardEarned={handleRewardEarned}
-        t={t}
-      />
     </div>
   );
 }
