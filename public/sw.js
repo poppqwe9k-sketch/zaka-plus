@@ -1,10 +1,11 @@
-const CACHE_NAME = 'zaka-plus-v4';
+const CACHE_NAME = 'zaka-plus-v6';
 const APP_CACHE_PREFIX = 'zaka-plus-';
 const APP_SHELL = [
   '/',
   '/index.html',
   '/manifest.json?v=4',
-  '/logo.png?v=4'
+  '/logo.png?v=4',
+  '/logo.svg'
 ];
 
 self.addEventListener('install', (event) => {
@@ -25,7 +26,15 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const request = event.request;
   const url = new URL(request.url);
-  if (request.method !== 'GET' || url.origin !== self.location.origin || url.pathname.startsWith('/api/')) return;
+  if (
+    request.method !== 'GET'
+    || url.origin !== self.location.origin
+    || url.pathname.startsWith('/api/')
+    || url.pathname.startsWith('/@')
+    || url.pathname.startsWith('/node_modules/')
+  ) {
+    return;
+  }
 
   if (request.mode === 'navigate') {
     event.respondWith(
@@ -40,7 +49,30 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  if (url.pathname.startsWith('/assets/') || url.pathname === '/manifest.json' || url.pathname === '/manifest.webmanifest' || url.pathname.endsWith('.png')) {
+  // Network-first for unhashed source files (/src/*) so module updates never go stale.
+  if (
+    url.pathname.startsWith('/src/')
+    || (!url.pathname.startsWith('/assets/') && (url.pathname.endsWith('.js') || url.pathname.endsWith('.jsx') || url.pathname.endsWith('.css')))
+  ) {
+    event.respondWith(
+      fetch(request).then((response) => {
+        if (response.ok) {
+          const copy = response.clone();
+          event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.put(request, copy)));
+        }
+        return response;
+      }).catch(async () => (await caches.match(request)) || Response.error())
+    );
+    return;
+  }
+
+  if (
+    url.pathname.startsWith('/assets/')
+    || url.pathname === '/manifest.json'
+    || url.pathname === '/manifest.webmanifest'
+    || url.pathname.endsWith('.png')
+    || url.pathname.endsWith('.svg')
+  ) {
     event.respondWith(
       caches.match(request).then((cached) => cached || fetch(request).then((response) => {
         if (response.ok) {

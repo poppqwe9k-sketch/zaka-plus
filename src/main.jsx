@@ -41,21 +41,50 @@ function installSidebarEnhancements() {
     rename.textContent = '✎';
     rename.addEventListener('click', (event) => {
       event.stopPropagation();
-      const nextTitle = window.prompt('اكتب الاسم الجديد للمحادثة:', title.textContent)?.trim();
-      if (!nextTitle) return;
-      try {
-        const storageKey = 'zaka-plus-chat-v5';
-        const saved = JSON.parse(localStorage.getItem(storageKey) || '{}');
-        const chats = Array.isArray(saved.chats) ? saved.chats : [];
-        const chat = chats.find((item) => item.id === entry.querySelector('.history-select')?.getAttribute('data-chat-id'));
-        const matchingChat = chat || chats.find((item) => item.title === title.textContent);
-        if (!matchingChat) return;
-        matchingChat.title = nextTitle.slice(0, 80);
-        localStorage.setItem(storageKey, JSON.stringify({ ...saved, chats }));
-        window.location.reload();
-      } catch {
-        window.alert('تعذرت إعادة تسمية المحادثة.');
-      }
+      if (entry.querySelector('.history-rename-input')) return;
+      const currentTitle = title.textContent || '';
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.value = currentTitle;
+      input.maxLength = 80;
+      input.className = 'history-rename-input';
+      input.style.cssText = 'flex:1;min-width:0;font:inherit;font-size:13px;padding:2px 6px;border-radius:6px;border:1px solid currentColor;background:transparent;color:inherit;';
+
+      let settled = false;
+      const cleanup = () => {
+        if (settled) return false;
+        settled = true;
+        if (input.isConnected) input.remove();
+        select.style.display = '';
+        return true;
+      };
+
+      const commitRename = () => {
+        const nextTitle = input.value.trim();
+        if (!cleanup()) return;
+        if (!nextTitle || nextTitle === currentTitle) return;
+        const safeTitle = nextTitle.slice(0, 80);
+        const chatId = entry.querySelector('.history-select')?.getAttribute('data-chat-id') || '';
+        window.dispatchEvent(new CustomEvent('zaka-chat-rename', {
+          detail: { chatId, previousTitle: currentTitle, title: safeTitle }
+        }));
+      };
+
+      input.addEventListener('click', (e) => e.stopPropagation());
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          commitRename();
+        } else if (e.key === 'Escape') {
+          cleanup();
+        }
+      });
+      input.addEventListener('blur', commitRename, { once: true });
+
+      select.style.display = 'none';
+      entry.insertBefore(input, rename);
+      input.focus();
+      input.select();
     });
     entry.append(rename);
   });
@@ -67,8 +96,10 @@ installSidebarEnhancements();
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js?v=4').catch((error) => {
-      console.error('Service worker registration failed:', error);
-    });
+    navigator.serviceWorker.register('/sw.js?v=6')
+      .then((reg) => reg.update().catch(() => {}))
+      .catch((error) => {
+        console.error('Service worker registration failed:', error);
+      });
   });
 }

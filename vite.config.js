@@ -8,6 +8,11 @@ export default defineConfig({
   plugins: [react()],
   base: '/',
   publicDir: 'public',
+  server: {
+    host: '0.0.0.0',
+    port: 3000,
+    allowedHosts: true
+  },
   build: {
     outDir: 'dist',
     emptyOutDir: true,

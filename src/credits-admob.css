@@ -1,0 +1,330 @@
+/* Credits counter, rewarded ad prompt bar, and smart preview simulation modal */
+.credits-inline-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.credits-inline-meta strong {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.credits-inline-empty strong {
+  color: #b42318;
+}
+
+.chat-dark .credits-inline-empty strong {
+  color: #ffb4ad;
+}
+
+.reward-ad-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--surface);
+  box-shadow: 0 6px 20px #0000000b;
+}
+
+.reward-ad-banner-highlight {
+  border-color: #7567ed;
+  box-shadow: 0 0 0 3px #7567ed22, 0 8px 24px #00000012;
+}
+
+.reward-ad-copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.reward-ad-title {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.reward-ad-desc {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.reward-ad-button {
+  min-height: 44px;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border: 0;
+  border-radius: 12px;
+  color: #fff;
+  background: linear-gradient(135deg, #6959df, #4f40c2);
+  box-shadow: 0 4px 14px #6959df38;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.35;
+  text-align: center;
+  cursor: pointer;
+  transition: transform .16s ease, box-shadow .16s ease, opacity .16s ease;
+}
+
+.reward-ad-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 20px #6959df4d;
+}
+
+.reward-ad-button:focus-visible,
+.admob-primary-btn:focus-visible,
+.admob-secondary-btn:focus-visible,
+.admob-close-btn:focus-visible {
+  outline: 2px solid #7567ed;
+  outline-offset: 2px;
+}
+
+.reward-ad-button:disabled {
+  opacity: .65;
+  cursor: wait;
+}
+
+.reward-ad-button svg {
+  width: 17px;
+  height: 17px;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.settings-reward-btn {
+  min-height: 40px;
+  padding: 8px 14px;
+  border: 1px solid #6959df44;
+  border-radius: 10px;
+  color: #5b4cc9;
+  background: #6959df14;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background .15s ease, transform .15s ease;
+}
+
+.settings-reward-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  background: #6959df22;
+}
+
+.chat-dark .settings-reward-btn {
+  border-color: #8b7ef744;
+  color: #c7bfff;
+  background: #6959df29;
+}
+
+.admob-overlay {
+  position: fixed;
+  z-index: 90;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  background: #080a0fa8;
+  backdrop-filter: blur(5px);
+}
+
+.admob-dialog {
+  width: min(100%, 420px);
+  display: grid;
+  gap: 18px;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  color: var(--text);
+  background: var(--surface);
+  box-shadow: 0 24px 70px #00000048;
+}
+
+.admob-dialog-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.admob-kicker {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  margin-bottom: 3px;
+}
+
+.admob-dialog-header h2 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.admob-close-btn {
+  width: 40px;
+  height: 40px;
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: 10px;
+  color: var(--muted);
+  background: transparent;
+  cursor: pointer;
+  font-size: 22px;
+}
+
+.admob-close-btn:hover {
+  background: var(--surface-hover);
+}
+
+.admob-stage {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  padding: 20px 16px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--surface-hover);
+  text-align: center;
+}
+
+.admob-countdown-ring {
+  width: 64px;
+  height: 64px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 2px solid #6959df;
+  background: var(--surface);
+  color: #6959df;
+  font-size: 24px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.chat-dark .admob-countdown-ring {
+  color: #a99ef9;
+  border-color: #8b7ef7;
+}
+
+.admob-stage-status {
+  margin: 0;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.admob-stage-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.admob-progress-track {
+  width: 100%;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--line);
+}
+
+.admob-progress-fill {
+  width: 100%;
+  height: 100%;
+  transform-origin: left center;
+  background: #6959df;
+  transition: transform .35s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+[dir="rtl"] .admob-progress-fill {
+  transform-origin: right center;
+}
+
+.admob-dialog-actions {
+  display: flex;
+  justify-content: stretch;
+}
+
+.admob-primary-btn,
+.admob-secondary-btn {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 16px;
+  border-radius: 12px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform .15s ease, background .15s ease;
+}
+
+.admob-primary-btn {
+  border: 0;
+  color: #fff;
+  background: #6959df;
+}
+
+.admob-primary-btn:hover {
+  background: #5b4cc9;
+}
+
+.admob-secondary-btn {
+  border: 1px solid var(--line);
+  color: var(--text);
+  background: var(--surface-raised);
+}
+
+.admob-secondary-btn:hover {
+  background: var(--surface-hover);
+}
+
+@media (max-width: 600px) {
+  .reward-ad-banner {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .reward-ad-button {
+    width: 100%;
+  }
+
+  .admob-overlay {
+    align-items: flex-end;
+    padding: 0;
+  }
+
+  .admob-dialog {
+    width: 100%;
+    border-radius: 20px 20px 0 0;
+    border-bottom: 0;
+    padding-bottom: max(20px, env(safe-area-inset-bottom));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reward-ad-button,
+  .admob-progress-fill,
+  .admob-primary-btn,
+  .admob-secondary-btn {
+    transition-duration: .01ms !important;
+  }
+}

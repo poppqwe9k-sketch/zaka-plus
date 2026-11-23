@@ -35,6 +35,23 @@
           localStorage.setItem(key, JSON.stringify({ ...saved, settings: { ...(saved.settings || {}), lang } }));
         }
       } catch { /* Continue with defaults if storage is unavailable. */ }
+      try {
+        if ('caches' in window) {
+          caches.delete('zaka-plus-v5').catch(() => {});
+        }
+        if ('serviceWorker' in navigator) {
+          const hadController = Boolean(navigator.serviceWorker.controller);
+          navigator.serviceWorker.addEventListener('controllerchange', () => {
+            if (hadController && !sessionStorage.getItem('zaka-sw-reloaded-v6')) {
+              sessionStorage.setItem('zaka-sw-reloaded-v6', '1');
+              window.location.reload();
+            }
+          });
+          navigator.serviceWorker.getRegistrations().then((regs) => {
+            regs.forEach((reg) => reg.update().catch(() => {}));
+          }).catch(() => {});
+        }
+      } catch { /* Ignore SW cleanup issues. */ }
     </script>
   </head>
   <body>

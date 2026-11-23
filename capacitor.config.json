@@ -1,0 +1,16 @@
+{
+  "appId": "com.zakaplus.app",
+  "appName": "Zaka+",
+  "webDir": "dist",
+  "bundledWebRuntime": false,
+  "android": {
+    "allowMixedContent": false
+  },
+  "plugins": {
+    "AdMob": {
+      "appId": "ca-app-pub-4013056048918002~1377092939",
+      "rewardedAdUnitId": "ca-app-pub-4013056048918002/6517738972",
+      "initializeForTesting": false
+    }
+  }
+}

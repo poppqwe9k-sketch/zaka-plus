@@ -1,32 +1,85 @@
-.generated-image-card .image-generation-pending {
-  visibility: hidden;
+.generated-image-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  max-width: 100%;
 }
+
+.generated-image-card img {
+  display: block;
+  width: 100%;
+  max-width: 280px;
+  height: auto;
+  max-height: 320px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  object-fit: cover;
+  background: var(--surface-hover);
+}
+
+.generated-image-card .image-generation-pending {
+  display: none;
+}
+
 .image-generation-status {
   display: flex;
-  min-height: 120px;
+  width: min(100%, 280px);
+  min-height: 150px;
+  padding: 12px;
   align-items: center;
   justify-content: center;
   gap: 10px;
   border: 1px solid var(--line);
-  border-radius: 15px;
+  border-radius: 14px;
   color: var(--muted);
   background: var(--surface-hover);
-  font-size: 13px;
+  font-size: 12px;
+  text-align: center;
 }
+
 .image-generation-status[data-state="loading"]::before {
   width: 18px;
   height: 18px;
+  flex: 0 0 auto;
   border: 2px solid currentColor;
   border-left-color: transparent;
   border-radius: 50%;
   content: "";
   animation: image-generation-spin .8s linear infinite;
 }
-@keyframes image-generation-spin { to { transform: rotate(360deg); } }
-.generated-image-card .image-generation-ready {
-  visibility: visible;
-  width: min(100%, 560px);
-  height: auto;
-  max-height: 600px;
-  object-fit: contain;
+
+@keyframes image-generation-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.image-download-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--text);
+  background: var(--surface-raised);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  transition: background .15s ease, border-color .15s ease;
+}
+
+.image-download-button:hover {
+  background: var(--surface-hover);
+}
+
+.image-download-button svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }

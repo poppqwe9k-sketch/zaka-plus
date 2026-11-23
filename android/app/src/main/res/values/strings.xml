@@ -1,0 +1,9 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">ذكاء بلس | Zaka+</string>
+    <string name="title_activity_main">ذكاء بلس | Zaka+</string>
+    <string name="package_name">com.zakaplus.app</string>
+    <string name="custom_url_scheme">com.zakaplus.app</string>
+    <string name="admob_app_id">ca-app-pub-4013056048918002~1377092939</string>
+    <string name="admob_rewarded_ad_unit_id">ca-app-pub-4013056048918002/6517738972</string>
+</resources>

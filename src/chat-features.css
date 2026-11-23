@@ -66,3 +66,131 @@
     display: none;
   }
 }
+
+.offline-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--line);
+  color: #8a5300;
+  background: #fff7e6;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.chat-dark .offline-banner {
+  color: #ffd584;
+  background: #2b2314;
+}
+
+.offline-dot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: #d9822b;
+}
+
+.status-dot-offline {
+  background: #d9822b;
+  box-shadow: 0 0 0 3px #d9822b26;
+}
+
+.welcome-tier-desc {
+  margin: 10px auto 0 !important;
+  max-width: 420px;
+  color: var(--muted);
+  font-size: 12px !important;
+  line-height: 1.6;
+}
+
+.history-empty {
+  padding: 12px 10px;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+.composer-tools {
+  flex-wrap: wrap;
+}
+
+.history-search-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  margin-top: 12px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--surface-raised);
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+
+.history-search-wrap:focus-within {
+  border-color: #7567ed;
+  box-shadow: 0 0 0 3px #7567ed22;
+}
+
+.history-search-icon {
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  margin-inline-start: 10px;
+  color: var(--muted);
+}
+
+.history-search-icon svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.history-search-input {
+  width: 100%;
+  min-width: 0;
+  min-height: 36px;
+  padding: 6px 8px;
+  border: 0;
+  outline: 0;
+  color: var(--text);
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+}
+
+.history-search-input::placeholder {
+  color: var(--muted);
+}
+
+.history-search-input::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.history-search-clear {
+  width: 26px;
+  height: 26px;
+  flex: 0 0 auto;
+  margin-inline-end: 5px;
+  border: 0;
+  border-radius: 7px;
+  color: var(--muted);
+  background: transparent;
+  cursor: pointer;
+  font-size: 17px;
+  line-height: 1;
+}
+
+.history-search-clear:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+
+
