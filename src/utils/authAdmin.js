@@ -2,6 +2,8 @@ import { CREDITS_CYCLE_MS, DAILY_FREE_CREDITS, getLocalDateKey } from './credits
 
 export const ADMIN_EMAIL = 'poppqwe9k@gmail.com';
 export const GLOBAL_ADMIN_CAPACITY_TARGET = 200;
+export const PLUS_PLUS_ADMIN_CAPACITY_TARGET = 200;
+export const PLUS_ADMIN_CAPACITY_TARGET = 10000;
 
 export const USER_PLANS = [
   { id: 'free', defaultDailyLimit: DAILY_FREE_CREDITS },
@@ -71,29 +73,65 @@ export function buildInitialUserProfile({
   };
 }
 
-export function computeAdminCapacitySummary(dailyQuota) {
-  const targetCapacity = GLOBAL_ADMIN_CAPACITY_TARGET;
+export function computeAdminCapacitySummary(
+  dailyQuota,
+  targetCapacity = GLOBAL_ADMIN_CAPACITY_TARGET
+) {
+  const safeTarget = Math.max(1, Math.floor(Number(targetCapacity) || GLOBAL_ADMIN_CAPACITY_TARGET));
   if (!dailyQuota || typeof dailyQuota !== 'object') {
     return {
-      targetCapacity,
-      remaining: targetCapacity,
+      targetCapacity: safeTarget,
+      remaining: safeTarget,
       used: 0,
       percentRemaining: 100,
       validKeyCount: 0,
-      actualCapacity: targetCapacity
+      actualCapacity: safeTarget
     };
   }
 
   const validKeyCount = Math.max(0, Math.floor(Number(dailyQuota.validKeyCount) || 0));
   const actualCapacity = Math.max(0, Math.floor(Number(dailyQuota.totalCapacity) || 0));
-  const used = Math.max(0, Math.floor(Number(dailyQuota.usedCount) || 0));
 
   let remaining = 0;
   if (validKeyCount > 0) {
     const rawRemaining = Math.max(0, Math.floor(Number(dailyQuota.remaining) || 0));
-    remaining = Math.min(targetCapacity, rawRemaining);
+    remaining = Math.min(safeTarget, rawRemaining);
   }
 
+  const percentRemaining = safeTarget > 0
+    ? Math.max(0, Math.min(100, Math.round((remaining / safeTarget) * 100)))
+    : 0;
+
+  return {
+    targetCapacity: safeTarget,
+    remaining,
+    used: Math.max(0, safeTarget - remaining),
+    percentRemaining,
+    validKeyCount,
+    actualCapacity
+  };
+}
+
+function summarizeSingleModelCapacity(state, targetCapacity, dbUsed = null, fallbackValidKeys = 0) {
+  const base = computeAdminCapacitySummary(state, targetCapacity);
+  const effectiveValidKeys = state && typeof state === 'object'
+    ? base.validKeyCount
+    : Math.max(0, Math.floor(Number(fallbackValidKeys) || 0));
+
+  let remaining = base.remaining;
+  if (dbUsed !== null) {
+    if (state && typeof state === 'object' && base.validKeyCount === 0) {
+      remaining = 0;
+    } else {
+      const dbRemaining = Math.max(0, targetCapacity - dbUsed);
+      const hasExhaustedServerKeys = Boolean(
+        state && typeof state === 'object' && Number(state.exhaustedKeyCount) > 0
+      );
+      remaining = hasExhaustedServerKeys ? Math.min(dbRemaining, base.remaining) : dbRemaining;
+    }
+  }
+
+  const used = Math.max(0, targetCapacity - remaining);
   const percentRemaining = targetCapacity > 0
     ? Math.max(0, Math.min(100, Math.round((remaining / targetCapacity) * 100)))
     : 0;
@@ -101,11 +139,49 @@ export function computeAdminCapacitySummary(dailyQuota) {
   return {
     targetCapacity,
     remaining,
-    used: Math.max(0, targetCapacity - remaining),
+    used,
     percentRemaining,
-    validKeyCount,
-    actualCapacity
+    validKeyCount: effectiveValidKeys,
+    actualCapacity: base.actualCapacity
   };
+}
+
+export function computeDualModelCapacitySummary({
+  dailyQuota = null,
+  plusDailyQuota = null,
+  quotaAnalytics = null,
+  now = Date.now()
+} = {}) {
+  const cycleStartedAt = Number(quotaAnalytics?.cycleStartedAt);
+  const hasDbDoc = Boolean(
+    quotaAnalytics
+    && typeof quotaAnalytics === 'object'
+    && Number.isFinite(cycleStartedAt)
+    && cycleStartedAt > 0
+  );
+  const dbExpired = hasDbDoc
+    ? (now < cycleStartedAt || now - cycleStartedAt >= CREDITS_CYCLE_MS)
+    : false;
+  const dbPlusPlusUsed = hasDbDoc
+    ? (dbExpired ? 0 : Math.max(0, Math.floor(Number(quotaAnalytics.plusPlusUsed) || 0)))
+    : null;
+  const dbPlusUsed = hasDbDoc
+    ? (dbExpired ? 0 : Math.max(0, Math.floor(Number(quotaAnalytics.plusUsed) || 0)))
+    : null;
+
+  const plusPlus = summarizeSingleModelCapacity(
+    dailyQuota,
+    PLUS_PLUS_ADMIN_CAPACITY_TARGET,
+    dbPlusPlusUsed
+  );
+  const plus = summarizeSingleModelCapacity(
+    plusDailyQuota,
+    PLUS_ADMIN_CAPACITY_TARGET,
+    dbPlusUsed,
+    plusPlus.validKeyCount
+  );
+
+  return { plusPlus, plus };
 }
 
 export function isUserProfileCycleExpired(profile, now = Date.now()) {
@@ -113,6 +189,11 @@ export function isUserProfileCycleExpired(profile, now = Date.now()) {
   if (!Number.isFinite(startedAt) || startedAt <= 0) return true;
   if (now < startedAt) return true;
   return now - startedAt >= CREDITS_CYCLE_MS;
+}
+
+export function isPaidPlanUser(user) {
+  const plan = normalizePlan(user?.plan);
+  return plan === 'pro' || plan === 'vip';
 }
 
 export function filterAndSortUsers(users = [], query = '') {
@@ -136,6 +217,12 @@ export function filterAndSortUsers(users = [], query = '') {
       : (Number(b?.cycleStartedAt) || 0);
     return bTime - aTime;
   });
+}
+
+export function filterUsersDirectory(users = [], { query = '', paidOnly = false } = {}) {
+  const base = Array.isArray(users) ? users : [];
+  const scoped = paidOnly ? base.filter((u) => isPaidPlanUser(u)) : base;
+  return filterAndSortUsers(scoped, query);
 }
 
 export function mapFirebaseAuthError(error, t = {}) {

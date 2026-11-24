@@ -29,6 +29,10 @@ test('GET /api/quota returns valid key count and 20 messages per key without exp
   assert.equal(body.totalCapacity, 200);
   assert.equal(body.exhaustedKeyCount, 0);
   assert.equal(body.maxRemainingFromHealthyKeys, 200);
+  assert.equal(body.models['plus-max'].quotaPerKey, 20);
+  assert.equal(body.models['plus-max'].totalCapacity, 200);
+  assert.equal(body.models['plus-fast'].quotaPerKey, 1000);
+  assert.equal(body.models['plus-fast'].totalCapacity, 10000);
 });
 
 test('getServerQuotaSnapshot excludes invalid 401 keys, tracks 429 exhausted keys, and resets exhaustion after 24 hours', () => {

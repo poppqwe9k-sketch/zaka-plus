@@ -1,12 +1,21 @@
 import { ThinkingLevel } from '@google/genai';
-import { resolveTierConfig } from '../../src/shared/modelTiers.js';
 import {
+  FAST_MODEL_TIER,
+  GEMINI_FALLBACK_LITE_MODEL_ID,
+  GEMINI_HYDROGEN_MODEL_ID,
+  SUPER_MODEL_TIER,
+  resolveTierConfig
+} from '../../src/shared/modelTiers.js';
+import {
+  PLUS_QUOTA_PER_KEY,
   clearGeminiKeyFailureState,
+  clearModelQuotaExhausted,
   createGeminiClient,
   getGeminiApiKeys,
   getServerQuotaSnapshot,
   isAuthKeyError,
   isKeyRotationEligibleError,
+  isKnownInvalidAuthKey,
   isQuotaExhaustedError,
   markGeminiKeyCooldown,
   rotateGeminiKeys,
@@ -90,32 +99,39 @@ function validateAttachments(value) {
 }
 
 export function buildModelConfig(model, systemInstruction, tierConfig, isFallback = false) {
+  const useGoogleSearch = Boolean(tierConfig?.deepThinking) && !tierConfig?.disableSearchTool;
+
   if (typeof model === 'string' && (model.startsWith('gemini-4-') || model.startsWith('gemini-3'))) {
-    let levelKey = tierConfig.thinkingLevel || 'LOW';
+    let levelKey = !isFallback ? tierConfig.thinkingLevel : null;
     if (levelKey === 'XHIGH' && model !== 'gemini-4-hydrogen' && model !== 'gemini-4-neon') {
       levelKey = 'HIGH';
     }
-    return {
+    const config = {
       ...(systemInstruction ? { systemInstruction } : {}),
-      thinkingConfig: {
-        thinkingLevel: THINKING_ENUM_BY_KEY[levelKey] || ThinkingLevel.LOW
-      }
+      ...(useGoogleSearch ? { tools: [{ googleSearch: {} }] } : {})
     };
+    if (levelKey && THINKING_ENUM_BY_KEY[levelKey]) {
+      config.thinkingConfig = {
+        thinkingLevel: THINKING_ENUM_BY_KEY[levelKey]
+      };
+    }
+    return config;
   }
 
   const budget = isFallback
-    ? (tierConfig.fallbackThinkingBudget ?? 0)
-    : (tierConfig.thinkingBudget ?? 0);
+    ? (tierConfig.fallbackThinkingBudget ?? null)
+    : (tierConfig.thinkingBudget ?? null);
+  const config = {
+    ...(systemInstruction ? { systemInstruction } : {}),
+    ...(useGoogleSearch ? { tools: [{ googleSearch: {} }] } : {})
+  };
   if (typeof budget === 'number' && budget >= 0) {
-    return {
-      systemInstruction,
-      thinkingConfig: {
-        thinkingBudget: budget
-      }
+    config.thinkingConfig = {
+      thinkingBudget: budget
     };
   }
 
-  return { systemInstruction };
+  return config;
 }
 
 function isUnavailableModelError(error) {
@@ -141,6 +157,34 @@ function extractGeminiReplyText(response) {
   return '';
 }
 
+export function extractGroundingSources(response) {
+  const chunks = response?.candidates?.[0]?.groundingMetadata?.groundingChunks;
+  if (!Array.isArray(chunks) || chunks.length === 0) return [];
+  const seen = new Set();
+  const sources = [];
+  for (const chunk of chunks) {
+    const rawUri = typeof chunk?.web?.uri === 'string' ? chunk.web.uri.trim() : '';
+    if (!rawUri) continue;
+    let parsedUrl;
+    try {
+      parsedUrl = new URL(rawUri);
+    } catch {
+      continue;
+    }
+    if (parsedUrl.protocol !== 'https:' && parsedUrl.protocol !== 'http:') continue;
+    const uri = parsedUrl.toString().slice(0, 1000);
+    if (seen.has(uri)) continue;
+    seen.add(uri);
+    const rawTitle = typeof chunk?.web?.title === 'string' ? chunk.web.title.trim() : '';
+    sources.push({
+      title: (rawTitle || parsedUrl.hostname || 'Web source').slice(0, 180),
+      uri
+    });
+    if (sources.length >= 8) break;
+  }
+  return sources;
+}
+
 function buildEmptyResponseError(response) {
   const blockReason = response?.promptFeedback?.blockReason;
   const finishReason = response?.candidates?.[0]?.finishReason;
@@ -154,15 +198,40 @@ function buildEmptyResponseError(response) {
 }
 
 export async function runGeminiTier(env, messages, attachments, systemInstruction, tierConfig, generateFn = null) {
+  if (Boolean(tierConfig?.deepThinking) && !tierConfig?.disableSearchTool) {
+    try {
+      return await runGeminiTierCore(env, messages, attachments, systemInstruction, tierConfig, generateFn);
+    } catch (searchPassError) {
+      const status = typeof searchPassError?.status === 'number' ? searchPassError.status : 0;
+      if (isQuotaExhaustedError(searchPassError) || status === 400 || status === 403 || status === 429) {
+        const modelsToClear = [
+          tierConfig?.model,
+          ...(Array.isArray(tierConfig?.fallbackModels) ? tierConfig.fallbackModels : [])
+        ].filter(Boolean);
+        for (const m of modelsToClear) {
+          clearModelQuotaExhausted(m);
+        }
+        return runGeminiTierCore(
+          env,
+          messages,
+          attachments,
+          systemInstruction,
+          { ...tierConfig, disableSearchTool: true },
+          generateFn
+        );
+      }
+      throw searchPassError;
+    }
+  }
+  return runGeminiTierCore(env, messages, attachments, systemInstruction, tierConfig, generateFn);
+}
+
+async function runGeminiTierCore(env, messages, attachments, systemInstruction, tierConfig, generateFn = null) {
   const isCustomGenerateFn = typeof generateFn === 'function';
   const configuredKeys = getGeminiApiKeys(env);
   if (!isCustomGenerateFn && configuredKeys.length === 0) {
     throw new Error('لم يتم العثور على مفاتيح GEMINI_KEY أو GEMINI_KEY_1..19 أو GEMINI_KEYS على الخادم.');
   }
-
-  const currentModel = tierConfig.model || 'gemini-4-hydrogen';
-  const rotatedKeys = rotateGeminiKeys(env, currentModel);
-  const keyPool = rotatedKeys.length > 0 ? rotatedKeys : ['test-key'];
 
   const contents = messages.map(({ role, content }) => ({
     role: role === 'assistant' ? 'model' : 'user',
@@ -183,119 +252,163 @@ export async function runGeminiTier(env, messages, attachments, systemInstructio
     );
   }
 
-  const config = buildModelConfig(currentModel, systemInstruction, tierConfig, false);
-  const activeKeyPool = keyPool;
-  const quota429Keys = new Set();
-  const authInvalidKeys = new Set();
-  const attemptedKeys = new Set();
+  const candidateModels = [
+    tierConfig.model || GEMINI_HYDROGEN_MODEL_ID,
+    ...(Array.isArray(tierConfig.fallbackModels) ? tierConfig.fallbackModels : [])
+  ].filter(Boolean);
+  const modelsToTry = Array.from(new Set(candidateModels));
 
-  const buildRequestQuotaMeta = (succeeded) => {
-    const base = getServerQuotaSnapshot(env, currentModel);
-    const validKeyCount = isCustomGenerateFn
-      ? Math.max(0, base.validKeyCount - authInvalidKeys.size)
-      : base.validKeyCount;
-    const exhaustedKeyCount = isCustomGenerateFn
-      ? Math.min(validKeyCount, Math.max(base.exhaustedKeyCount, quota429Keys.size))
-      : base.exhaustedKeyCount;
-    const healthyKeyCount = Math.max(0, validKeyCount - exhaustedKeyCount);
-    const totalCapacity = validKeyCount * base.quotaPerKey;
-    const maxRemainingFromHealthyKeys = healthyKeyCount * base.quotaPerKey;
+  const primaryQuota429Keys = new Set();
+  const primaryAuthInvalidKeys = new Set();
+  const primaryAttemptedKeys = new Set();
+  let primaryWasQuotaExhausted = false;
+  let lastError;
+  let lastTriedKeysCount = configuredKeys.length || 1;
+
+  const buildPrimaryQuotaMeta = (primarySucceeded) => {
+    const base = getServerQuotaSnapshot(env, GEMINI_HYDROGEN_MODEL_ID);
     return {
       ...base,
-      validKeyCount,
-      exhaustedKeyCount,
-      healthyKeyCount,
-      totalCapacity,
-      maxRemainingFromHealthyKeys,
-      quota429ThisRequest: quota429Keys.size,
-      authFailedThisRequest: authInvalidKeys.size,
-      attemptedKeyCount: attemptedKeys.size,
-      reachedModel: attemptedKeys.size > 0,
-      succeeded
+      quota429ThisRequest: primaryQuota429Keys.size,
+      authFailedThisRequest: primaryAuthInvalidKeys.size,
+      attemptedKeyCount: primaryAttemptedKeys.size,
+      reachedModel: primaryAttemptedKeys.size > 0,
+      succeeded: primarySucceeded
     };
   };
 
-  let lastError;
-  for (let keyIndex = 0; keyIndex < activeKeyPool.length; keyIndex += 1) {
-    const activeKey = activeKeyPool[keyIndex];
-    const hasNextKey = keyIndex < activeKeyPool.length - 1;
-    const invokeGenerate = isCustomGenerateFn
-      ? generateFn
-      : (params) => createGeminiClient(activeKey).models.generateContent(params);
+  for (let modelIndex = 0; modelIndex < modelsToTry.length; modelIndex += 1) {
+    const currentModel = modelsToTry[modelIndex];
+    const isFallback = currentModel !== GEMINI_HYDROGEN_MODEL_ID || modelIndex > 0;
+    const isPrimaryModel = currentModel === GEMINI_HYDROGEN_MODEL_ID && !isFallback;
 
-    const maxAttempts = hasNextKey ? 1 : 2;
+    const rotatedKeys = rotateGeminiKeys(env, currentModel);
+    const nonInvalidKeys = rotatedKeys.filter((k) => !isKnownInvalidAuthKey(k));
+    const activeKeyPool = nonInvalidKeys.length > 0
+      ? nonInvalidKeys
+      : (rotatedKeys.length > 0 ? rotatedKeys : ['test-key']);
+    lastTriedKeysCount = activeKeyPool.length;
+    const config = buildModelConfig(currentModel, systemInstruction, tierConfig, isFallback);
 
-    const perKeyTimeoutMs = tierConfig.thinkingLevel === 'XHIGH' ? 25000 : 15000;
+    const modelQuota429Keys = new Set();
+    const modelAuthInvalidKeys = new Set();
+    let modelError = null;
+    let lastNonAuthError = null;
 
-    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-      try {
-        attemptedKeys.add(activeKey);
-        const invokePromise = invokeGenerate({
-          model: currentModel,
-          contents,
-          config,
-          ...(isCustomGenerateFn ? { apiKey: activeKey } : {})
-        });
-        const response = isCustomGenerateFn
-          ? await invokePromise
-          : await Promise.race([
-              invokePromise,
-              new Promise((_, reject) => setTimeout(() => {
-                const err = new Error('انتهت مهلة استجابة المفتاح الحالي.');
-                err.status = 504;
-                reject(err);
-              }, perKeyTimeoutMs))
-            ]);
+    for (let keyIndex = 0; keyIndex < activeKeyPool.length; keyIndex += 1) {
+      const activeKey = activeKeyPool[keyIndex];
+      const hasNextKey = keyIndex < activeKeyPool.length - 1;
+      const invokeGenerate = isCustomGenerateFn
+        ? generateFn
+        : (params) => createGeminiClient(activeKey).models.generateContent(params);
 
-        const reply = extractGeminiReplyText(response);
-        if (!reply) {
-          throw buildEmptyResponseError(response);
-        }
-        if (!isCustomGenerateFn && activeKey) {
-          clearGeminiKeyFailureState(activeKey, currentModel);
-        }
-        return {
-          reply,
-          usedModel: currentModel,
-          usedFallback: false,
-          quotaMeta: buildRequestQuotaMeta(true)
-        };
-      } catch (error) {
-        lastError = error;
+      const maxAttempts = hasNextKey ? 1 : 2;
+      const perKeyTimeoutMs = !isFallback && tierConfig.thinkingLevel === 'XHIGH' ? 25000 : 15000;
 
-        const status = typeof error?.status === 'number' ? error.status : 0;
+      for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+        try {
+          if (isPrimaryModel) {
+            primaryAttemptedKeys.add(activeKey);
+          }
+          const invokePromise = invokeGenerate({
+            model: currentModel,
+            contents,
+            config,
+            ...(isCustomGenerateFn ? { apiKey: activeKey } : {})
+          });
+          const response = isCustomGenerateFn
+            ? await invokePromise
+            : await Promise.race([
+                invokePromise,
+                new Promise((_, reject) => setTimeout(() => {
+                  const err = new Error('انتهت مهلة استجابة المفتاح الحالي.');
+                  err.status = 504;
+                  reject(err);
+                }, perKeyTimeoutMs))
+              ]);
 
-        if (isQuotaExhaustedError(error) && activeKey) {
-          quota429Keys.add(activeKey);
-        }
-        if (isAuthKeyError(error) && activeKey) {
-          authInvalidKeys.add(activeKey);
-        }
-        if (isKeyRotationEligibleError(error) && !isCustomGenerateFn && activeKey) {
-          markGeminiKeyCooldown(activeKey, error, currentModel);
-        }
+          const reply = extractGeminiReplyText(response);
+          if (!reply) {
+            throw buildEmptyResponseError(response);
+          }
+          const sources = extractGroundingSources(response);
+          if (configuredKeys.length > 0 && activeKey) {
+            clearGeminiKeyFailureState(activeKey, currentModel);
+          }
+          return {
+            reply,
+            sources,
+            usedModel: currentModel,
+            usedFallback: isFallback,
+            primaryCapacityExhausted: isFallback && primaryWasQuotaExhausted,
+            quotaMeta: buildPrimaryQuotaMeta(!isFallback)
+          };
+        } catch (error) {
+          modelError = error;
+          lastError = error;
+          if (!isAuthKeyError(error)) {
+            lastNonAuthError = error;
+          }
 
-        if (hasNextKey) {
+          const status = typeof error?.status === 'number' ? error.status : 0;
+
+          if (isQuotaExhaustedError(error) && activeKey) {
+            modelQuota429Keys.add(activeKey);
+            if (isPrimaryModel) primaryQuota429Keys.add(activeKey);
+          }
+          if (isAuthKeyError(error) && activeKey) {
+            modelAuthInvalidKeys.add(activeKey);
+            if (isPrimaryModel) primaryAuthInvalidKeys.add(activeKey);
+          }
+          if (isKeyRotationEligibleError(error) && configuredKeys.length > 0 && activeKey) {
+            markGeminiKeyCooldown(activeKey, error, currentModel);
+          }
+
+          if (isUnavailableModelError(error)) {
+            break;
+          }
+
+          if (hasNextKey) {
+            break;
+          }
+
+          if (attempt < maxAttempts - 1 && (status === 503 || status === 504)) {
+            await new Promise((resolve) => setTimeout(resolve, 450 * (attempt + 1)));
+            continue;
+          }
           break;
         }
-
-        if (attempt < maxAttempts - 1 && (status === 503 || status === 504)) {
-          await new Promise((resolve) => setTimeout(resolve, 450 * (attempt + 1)));
-          continue;
-        }
-
-        if (error && typeof error === 'object') {
-          error.triedKeys = activeKeyPool.length;
-          error.quotaMeta = buildRequestQuotaMeta(false);
-        }
-        throw error;
+      }
+      if (isUnavailableModelError(modelError)) {
+        break;
       }
     }
+
+    if (isAuthKeyError(modelError) && lastNonAuthError) {
+      modelError = lastNonAuthError;
+      lastError = lastNonAuthError;
+    }
+
+    if (isPrimaryModel) {
+      primaryWasQuotaExhausted = isQuotaExhaustedError(modelError) || modelQuota429Keys.size > 0;
+    }
+
+    const hasNextFallbackModel = modelIndex < modelsToTry.length - 1;
+    const allKeysAuthInvalid = modelAuthInvalidKeys.size >= activeKeyPool.length && modelQuota429Keys.size === 0;
+    if (hasNextFallbackModel && (!allKeysAuthInvalid || isUnavailableModelError(modelError))) {
+      continue;
+    }
+
+    if (modelError && typeof modelError === 'object') {
+      modelError.triedKeys = lastTriedKeysCount;
+      modelError.quotaMeta = buildPrimaryQuotaMeta(false);
+    }
+    throw modelError || new Error('تعذر الاتصال بنموذج Gemini.');
   }
 
   if (lastError && typeof lastError === 'object') {
-    lastError.triedKeys = activeKeyPool.length;
-    lastError.quotaMeta = buildRequestQuotaMeta(false);
+    lastError.triedKeys = lastTriedKeysCount;
+    lastError.quotaMeta = buildPrimaryQuotaMeta(false);
   }
   throw lastError || new Error('تعذر الاتصال بنموذج Gemini.');
 }
@@ -340,10 +453,26 @@ export async function handleChat(request, env, generateFn = null) {
     : undefined;
 
   const defaultModeOrModel = env?.GEMINI_MODE || env?.GEMINI_MODEL;
-  const tierConfig = resolveTierConfig(body?.selectedModel || defaultModeOrModel, Boolean(body?.deepThinking));
+  const useFallbackOnly = Boolean(
+    body?.useFallbackOnly
+    || body?.fallbackMode
+    || body?.model === GEMINI_FALLBACK_LITE_MODEL_ID
+  );
+  const tierConfig = resolveTierConfig(
+    body?.selectedModel || defaultModeOrModel,
+    Boolean(body?.deepThinking),
+    { useFallbackOnly }
+  );
 
   try {
-    const { reply, usedModel, usedFallback, quotaMeta } = await runGeminiTier(
+    const {
+      reply,
+      sources,
+      usedModel,
+      usedFallback,
+      primaryCapacityExhausted,
+      quotaMeta
+    } = await runGeminiTier(
       env,
       validation.messages,
       attachmentValidation.attachments,
@@ -351,16 +480,26 @@ export async function handleChat(request, env, generateFn = null) {
       tierConfig,
       generateFn
     );
+    const actualUsedTier = usedModel === GEMINI_HYDROGEN_MODEL_ID ? SUPER_MODEL_TIER : FAST_MODEL_TIER;
+    const plusQuotaMeta = {
+      ...getServerQuotaSnapshot(env, GEMINI_FALLBACK_LITE_MODEL_ID, Date.now(), PLUS_QUOTA_PER_KEY),
+      reachedModel: actualUsedTier === FAST_MODEL_TIER,
+      succeeded: actualUsedTier === FAST_MODEL_TIER
+    };
     return json({
       reply,
+      sources: Array.isArray(sources) ? sources : [],
       model: usedModel,
       requestedModel: tierConfig.model,
       usedFallback,
+      usedTier: actualUsedTier,
+      primaryCapacityExhausted: Boolean(primaryCapacityExhausted),
       tierId: tierConfig.tierId,
       modelName: tierConfig.labelAr,
       modelNameEn: tierConfig.labelEn,
       thinkingLevel: tierConfig.thinkingLevel,
-      quotaMeta
+      quotaMeta,
+      plusQuotaMeta
     });
   } catch (error) {
     const rawStatus = typeof error?.status === 'number' && error.status >= 400 ? error.status : 502;
@@ -391,7 +530,11 @@ export async function handleChat(request, env, generateFn = null) {
   }
 }
 
-export async function onRequestPost({ request, env = {}, generateFn = null }) {
+export async function onRequestPost({
+  request,
+  env = (typeof process !== 'undefined' && process.env ? process.env : {}),
+  generateFn = null
+}) {
   try {
     return await handleChat(request, env, generateFn);
   } catch {

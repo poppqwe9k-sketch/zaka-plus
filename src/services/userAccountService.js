@@ -1,12 +1,20 @@
 import {
   collection,
+  deleteDoc,
   doc,
   getDoc,
+  getDocFromServer,
+  getDocs,
+  getDocsFromServer,
   increment,
   onSnapshot,
+  query,
+  runTransaction,
   serverTimestamp,
   setDoc,
-  updateDoc
+  updateDoc,
+  where,
+  writeBatch
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase.js';
 import {
@@ -17,7 +25,13 @@ import {
   normalizePlan,
   sanitizeDisplayName
 } from '../utils/authAdmin.js';
-import { getLocalDateKey } from '../utils/credits.js';
+import { CREDITS_CYCLE_MS, getLocalDateKey } from '../utils/credits.js';
+import { GEMINI_HYDROGEN_MODEL_ID, SUPER_MODEL_TIER } from '../shared/modelTiers.js';
+import {
+  normalizeChatRecord,
+  prepareChatForFirestore,
+  sortChatsByRecent
+} from '../utils/chatStorage.js';
 
 const VISIT_SESSION_PREFIX = 'plus-ai-visit-logged:';
 
@@ -215,7 +229,188 @@ export async function renewExpiredCycleInFirestore(uid, currentProfile) {
   }
 }
 
-export function subscribeAdminDashboardData({ onUsers, onAnalytics, onError }) {
+export function subscribeUserChats(uid, onChats, onError) {
+  if (!uid) return () => {};
+  const path = `users/${uid}/chats`;
+  const chatsQuery = query(
+    collection(db, 'users', uid, 'chats'),
+    where('ownerUid', '==', uid)
+  );
+
+  return onSnapshot(
+    chatsQuery,
+    (snapshot) => {
+      const chats = sortChatsByRecent(
+        snapshot.docs
+          .map((docSnap) => normalizeChatRecord({ id: docSnap.id, ...docSnap.data() }))
+          .filter(Boolean)
+      );
+      onChats?.(chats);
+    },
+    (error) => {
+      try {
+        handleFirestoreError(error, OperationType.LIST, path);
+      } catch (wrapped) {
+        onError?.(wrapped);
+      }
+    }
+  );
+}
+
+export async function upsertUserChatInFirestore(uid, chat, { isKnownRemote = false } = {}) {
+  if (!uid || !chat) return;
+  const prepared = prepareChatForFirestore(chat, uid);
+  if (!prepared) return;
+
+  const path = `users/${uid}/chats/${prepared.id}`;
+  const chatRef = doc(db, 'users', uid, 'chats', prepared.id);
+
+  if (isKnownRemote) {
+    try {
+      await updateDoc(chatRef, {
+        title: prepared.title,
+        messages: prepared.messages,
+        updatedAtMs: prepared.updatedAtMs,
+        updatedAt: serverTimestamp()
+      });
+      return;
+    } catch (err) {
+      const code = err?.code || '';
+      const msg = err instanceof Error ? err.message : String(err || '');
+      if (code !== 'not-found' && !/no document to update/i.test(msg)) {
+        handleFirestoreError(err, OperationType.UPDATE, path);
+        return;
+      }
+    }
+  }
+
+  try {
+    await setDoc(chatRef, {
+      ...prepared,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, path);
+  }
+}
+
+export async function deleteUserChatInFirestore(uid, chatId) {
+  if (!uid || !chatId) return;
+  const safeId = chatId.trim().replace(/[^a-zA-Z0-9_\-]/g, '-').slice(0, 128);
+  if (!safeId) return;
+
+  const path = `users/${uid}/chats/${safeId}`;
+  try {
+    await deleteDoc(doc(db, 'users', uid, 'chats', safeId));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
+export async function clearUserChatsInFirestore(uid, chatIds = []) {
+  if (!uid || !Array.isArray(chatIds) || chatIds.length === 0) return;
+  const uniqueIds = Array.from(
+    new Set(
+      chatIds
+        .filter((id) => typeof id === 'string' && id.trim())
+        .map((id) => id.trim().replace(/[^a-zA-Z0-9_\-]/g, '-').slice(0, 128))
+        .filter(Boolean)
+    )
+  );
+  if (uniqueIds.length === 0) return;
+
+  const path = `users/${uid}/chats`;
+  try {
+    for (let i = 0; i < uniqueIds.length; i += 400) {
+      const chunk = uniqueIds.slice(i, i + 400);
+      const batch = writeBatch(db);
+      for (const chatId of chunk) {
+        batch.delete(doc(db, 'users', uid, 'chats', chatId));
+      }
+      await batch.commit();
+    }
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
+export async function recordModelUsageInFirestore(usedTierOrModel) {
+  const isPlusPlus = usedTierOrModel === SUPER_MODEL_TIER || usedTierOrModel === GEMINI_HYDROGEN_MODEL_ID;
+  const quotaRef = doc(db, 'analytics', 'quota');
+  const path = 'analytics/quota';
+
+  try {
+    return await runTransaction(db, async (tx) => {
+      const snap = await tx.get(quotaRef);
+      const now = Date.now();
+
+      if (!snap.exists()) {
+        const nextDoc = {
+          cycleStartedAt: now,
+          plusPlusUsed: isPlusPlus ? 1 : 0,
+          plusUsed: isPlusPlus ? 0 : 1
+        };
+        tx.set(quotaRef, {
+          ...nextDoc,
+          updatedAt: serverTimestamp()
+        });
+        return nextDoc;
+      }
+
+      const data = snap.data() || {};
+      const startedAt = Number(data.cycleStartedAt) || 0;
+      const expired = startedAt <= 0 || now < startedAt || (now - startedAt >= CREDITS_CYCLE_MS);
+
+      if (expired) {
+        const nextDoc = {
+          cycleStartedAt: now,
+          plusPlusUsed: isPlusPlus ? 1 : 0,
+          plusUsed: isPlusPlus ? 0 : 1
+        };
+        tx.update(quotaRef, {
+          ...nextDoc,
+          updatedAt: serverTimestamp()
+        });
+        return nextDoc;
+      }
+
+      const currentPlusPlus = Math.max(0, Math.floor(Number(data.plusPlusUsed) || 0));
+      const currentPlus = Math.max(0, Math.floor(Number(data.plusUsed) || 0));
+
+      if (isPlusPlus) {
+        tx.update(quotaRef, {
+          plusPlusUsed: currentPlusPlus + 1,
+          updatedAt: serverTimestamp()
+        });
+        return {
+          cycleStartedAt: startedAt,
+          plusPlusUsed: currentPlusPlus + 1,
+          plusUsed: currentPlus
+        };
+      }
+
+      tx.update(quotaRef, {
+        plusUsed: currentPlus + 1,
+        updatedAt: serverTimestamp()
+      });
+      return {
+        cycleStartedAt: startedAt,
+        plusPlusUsed: currentPlusPlus,
+        plusUsed: currentPlus + 1
+      };
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+export function subscribeAdminDashboardData({
+  onUsers,
+  onAnalytics,
+  onQuotaAnalytics,
+  onError
+}) {
   const unsubUsers = onSnapshot(
     collection(db, 'users'),
     (snapshot) => {
@@ -252,10 +447,96 @@ export function subscribeAdminDashboardData({ onUsers, onAnalytics, onError }) {
     }
   );
 
+  const unsubQuotaAnalytics = onSnapshot(
+    doc(db, 'analytics', 'quota'),
+    (snapshot) => {
+      onQuotaAnalytics?.(
+        snapshot.exists()
+          ? snapshot.data()
+          : { cycleStartedAt: 0, plusPlusUsed: 0, plusUsed: 0 }
+      );
+    },
+    (error) => {
+      try {
+        handleFirestoreError(error, OperationType.GET, 'analytics/quota');
+      } catch (wrapped) {
+        onError?.(wrapped);
+      }
+    }
+  );
+
   return () => {
     unsubUsers();
     unsubAnalytics();
+    unsubQuotaAnalytics();
   };
+}
+
+export async function fetchAdminDashboardData() {
+  let usersSnap;
+  try {
+    usersSnap = await getDocsFromServer(collection(db, 'users'));
+  } catch (serverErr) {
+    const code = serverErr?.code || '';
+    if (code === 'unavailable' || code === 'failed-precondition') {
+      try {
+        usersSnap = await getDocs(collection(db, 'users'));
+      } catch (err) {
+        handleFirestoreError(err, OperationType.LIST, 'users');
+      }
+    } else {
+      handleFirestoreError(serverErr, OperationType.LIST, 'users');
+    }
+  }
+
+  let analyticsSnap;
+  try {
+    analyticsSnap = await getDocFromServer(doc(db, 'analytics', 'site'));
+  } catch (serverErr) {
+    const code = serverErr?.code || '';
+    if (code === 'unavailable' || code === 'failed-precondition') {
+      try {
+        analyticsSnap = await getDoc(doc(db, 'analytics', 'site'));
+      } catch (err) {
+        handleFirestoreError(err, OperationType.GET, 'analytics/site');
+      }
+    } else {
+      handleFirestoreError(serverErr, OperationType.GET, 'analytics/site');
+    }
+  }
+
+  let quotaSnap;
+  try {
+    quotaSnap = await getDocFromServer(doc(db, 'analytics', 'quota'));
+  } catch (serverErr) {
+    const code = serverErr?.code || '';
+    if (code === 'unavailable' || code === 'failed-precondition') {
+      try {
+        quotaSnap = await getDoc(doc(db, 'analytics', 'quota'));
+      } catch (err) {
+        handleFirestoreError(err, OperationType.GET, 'analytics/quota');
+      }
+    } else {
+      handleFirestoreError(serverErr, OperationType.GET, 'analytics/quota');
+    }
+  }
+
+  const users = usersSnap
+    ? usersSnap.docs.map((docSnap) => ({
+        id: docSnap.id,
+        ...docSnap.data()
+      }))
+    : [];
+
+  const analytics = analyticsSnap?.exists()
+    ? analyticsSnap.data()
+    : { totalVisits: 0, registeredUsersCount: 0 };
+
+  const quotaAnalytics = quotaSnap?.exists()
+    ? quotaSnap.data()
+    : { cycleStartedAt: 0, plusPlusUsed: 0, plusUsed: 0 };
+
+  return { users, analytics, quotaAnalytics };
 }
 
 export async function adminUpdateUserSubscription(targetUid, { plan, dailyLimit, remainingCredits }) {

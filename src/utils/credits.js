@@ -105,8 +105,23 @@ export function saveCreditsState(state, storageKey = CREDITS_STORAGE_KEY) {
   }
 }
 
-export function isCreditRequiredAction({ wantsImage = false, selectedModel = 'plus' } = {}) {
-  return Boolean(wantsImage) || selectedModel === 'plus-max';
+export function isCreditRequiredAction({ wantsImage = false, selectedModel = 'plus-fast' } = {}) {
+  return Boolean(wantsImage) || selectedModel === 'plus-max' || selectedModel === 'plus-plus';
+}
+
+export function shouldUseFallbackLiteModel({
+  creditsRemaining = 0,
+  globalCapacityExhausted = false,
+  wantsImage = false,
+  selectedModel = 'plus-fast'
+} = {}) {
+  if (wantsImage) return false;
+  if (selectedModel !== 'plus-max' && selectedModel !== 'plus-plus') return true;
+  return Math.max(0, Number(creditsRemaining) || 0) <= 0 || Boolean(globalCapacityExhausted);
+}
+
+export function shouldDeductCreditForReply({ usedFallback = false } = {}) {
+  return !usedFallback;
 }
 
 export function consumeOneCredit(

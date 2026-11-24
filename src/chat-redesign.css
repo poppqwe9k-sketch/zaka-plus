@@ -13,6 +13,7 @@
   flex-direction: column;
   height: 100dvh;
   overflow: hidden;
+  touch-action: pan-x pan-y;
   color: var(--text);
   background: var(--page);
   font-family: 'IBM Plex Sans Arabic', Tahoma, Arial, sans-serif;
@@ -111,10 +112,13 @@
   background: linear-gradient(to bottom, transparent, var(--page) 17%, var(--page));
 }
 .composer-tools { min-height: 36px; display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
-.deep-thinking-button { min-height: 35px; display: inline-flex; align-items: center; gap: 7px; padding: 0 13px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); background: var(--surface); cursor: pointer; }
-.deep-thinking-button:hover { transform: translateY(-1px); border-color: #9b91f1; color: var(--text); }
-.deep-thinking-button.deep-thinking-active { border-color: #7567ed; color: #fff; background: #6959df; box-shadow: 0 0 0 3px #7567ed22, 0 5px 18px #7567ed55; }
-.deep-thinking-button span { font-size: 15px; }
+.composer-tools-bottom { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 9px; }
+.deep-thinking-button { min-height: 35px; display: inline-flex; align-items: center; gap: 7px; padding: 0 13px; border: 1px solid var(--line); border-radius: 999px; color: var(--text); background: var(--surface); cursor: pointer; transition: transform .15s ease, border-color .15s ease, background .15s ease, color .15s ease; }
+.deep-thinking-button:hover { transform: translateY(-1px); border-color: var(--text); background: var(--surface-hover); color: var(--text); }
+.deep-thinking-button.deep-thinking-active { border-color: #14161b; color: #ffffff; background: #14161b; box-shadow: 0 3px 12px #00000018; }
+.chat-dark .deep-thinking-button.deep-thinking-active { border-color: #f4f5f7; color: #111318; background: #f4f5f7; box-shadow: 0 3px 12px #00000033; }
+.deep-thinking-button svg { width: 15px; height: 15px; flex: 0 0 auto; fill: none; stroke: currentColor; stroke-width: 1.85; stroke-linecap: round; stroke-linejoin: round; }
+.deep-thinking-button span { font-size: 13px; font-weight: 600; }
 .thinking-hint { color: var(--muted); font-size: 11px; }
 .message-composer { position: relative; display: flex; align-items: flex-end; gap: 9px; padding: 9px; border: 1px solid var(--line); border-radius: 20px; background: var(--surface); box-shadow: 0 8px 30px #20212312; }
 .message-composer:focus-within { border-color: #a7adba; box-shadow: 0 8px 28px #20212318; }
@@ -175,7 +179,7 @@
   .message-avatar { width: 26px; height: 26px; }
   .composer-area { padding: 9px 12px max(12px, env(safe-area-inset-bottom)); }
   .message-composer { gap: 6px; padding: 7px; border-radius: 17px; }
-  .message-input { min-height: 40px; font-size: 13px; }
+  .message-input { min-height: 40px; font-size: 16px; }
   .send-button, .attach-button { width: 39px; height: 39px; flex-basis: 39px; }
   .composer-disclaimer { font-size: 9px; }
   .typing-bubble { min-width: 120px; }

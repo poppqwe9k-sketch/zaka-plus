@@ -2,9 +2,10 @@ import { GoogleGenAI } from '@google/genai';
 
 export const GEMINI_KEY_COUNT = 19;
 export const DAILY_QUOTA_PER_KEY = 20;
+export const PLUS_QUOTA_PER_KEY = 1000;
 export const QUOTA_CYCLE_MS = 24 * 60 * 60 * 1000;
 const QUOTA_COOLDOWN_MS = 15 * 1000;
-const AUTH_COOLDOWN_MS = 30 * 1000;
+const AUTH_COOLDOWN_MS = 10 * 60 * 1000;
 const GOOGLE_API_KEY_PATTERN = /^AIza[0-9A-Za-z_-]{20,}$/;
 const PLACEHOLDER_KEYS = new Set([
   'replace-with-your-private-key',
@@ -204,6 +205,17 @@ export function clearGeminiKeyFailureState(apiKey, model = 'gemini-4-hydrogen') 
   if (map) map.delete(apiKey);
 }
 
+export function clearModelQuotaExhausted(model = 'gemini-4-hydrogen') {
+  const targetModel = model || 'gemini-4-hydrogen';
+  QUOTA_EXHAUSTED_KEYS_BY_MODEL.delete(targetModel);
+  const suffix = `::${targetModel}`;
+  for (const key of MODEL_QUOTA_COOLDOWN.keys()) {
+    if (key.endsWith(suffix)) {
+      MODEL_QUOTA_COOLDOWN.delete(key);
+    }
+  }
+}
+
 export function markGeminiKeyCooldown(apiKey, error, model = '', now = Date.now()) {
   if (typeof apiKey !== 'string' || !apiKey) return;
   if (isAuthKeyError(error)) {
@@ -218,26 +230,44 @@ export function markGeminiKeyCooldown(apiKey, error, model = '', now = Date.now(
   MODEL_QUOTA_COOLDOWN.set(key, now + QUOTA_COOLDOWN_MS);
 }
 
-export function getServerQuotaSnapshot(env, model = 'gemini-4-hydrogen', now = Date.now()) {
+export function getServerQuotaSnapshot(
+  env,
+  model = 'gemini-4-hydrogen',
+  now = Date.now(),
+  quotaPerKey = DAILY_QUOTA_PER_KEY
+) {
+  const safeQuotaPerKey = typeof quotaPerKey === 'number' && Number.isFinite(quotaPerKey) && quotaPerKey > 0
+    ? Math.floor(quotaPerKey)
+    : DAILY_QUOTA_PER_KEY;
   const allKeys = getGeminiApiKeys(env);
   const validKeys = allKeys.filter((key) => !INVALID_AUTH_KEYS.has(key));
   const exhaustedMap = getModelExhaustedMap(model, now);
   const exhaustedKeyCount = validKeys.filter((key) => exhaustedMap.has(key)).length;
   const validKeyCount = validKeys.length;
   const healthyKeyCount = Math.max(0, validKeyCount - exhaustedKeyCount);
-  const totalCapacity = validKeyCount * DAILY_QUOTA_PER_KEY;
-  const maxRemainingFromHealthyKeys = healthyKeyCount * DAILY_QUOTA_PER_KEY;
+  const totalCapacity = validKeyCount * safeQuotaPerKey;
+  const maxRemainingFromHealthyKeys = healthyKeyCount * safeQuotaPerKey;
 
   return {
     validKeyCount,
     configuredKeyCount: allKeys.length,
     exhaustedKeyCount,
     healthyKeyCount,
-    quotaPerKey: DAILY_QUOTA_PER_KEY,
+    quotaPerKey: safeQuotaPerKey,
     totalCapacity,
     maxRemainingFromHealthyKeys,
     cycleDurationMs: QUOTA_CYCLE_MS
   };
+}
+
+export function getDualServerQuotaSnapshot(env, now = Date.now()) {
+  const plusPlus = getServerQuotaSnapshot(env, 'gemini-4-hydrogen', now, DAILY_QUOTA_PER_KEY);
+  const plus = getServerQuotaSnapshot(env, 'gemini-3.5-flash-lite', now, PLUS_QUOTA_PER_KEY);
+  return { plusPlus, plus };
+}
+
+export function isKnownInvalidAuthKey(apiKey) {
+  return typeof apiKey === 'string' && INVALID_AUTH_KEYS.has(apiKey);
 }
 
 export function isAuthKeyInCooldown(apiKey, now = Date.now()) {

@@ -9,7 +9,14 @@ import './auth-admin.css';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { auth } from './firebase.js';
 import { enableChatAutoScroll, scrollToBottom } from './chat-scroll.js';
-import { GEMINI_HYDROGEN_MODEL_ID } from './shared/modelTiers.js';
+import {
+  FAST_MODEL_TIER,
+  GEMINI_FALLBACK_LITE_MODEL_ID,
+  GEMINI_HYDROGEN_MODEL_ID,
+  MODEL_SELECTOR_OPTIONS,
+  SUPER_MODEL_TIER,
+  normalizeModelTier
+} from './shared/modelTiers.js';
 import AuthModal from './components/AuthModal.jsx';
 import AdminPanelModal from './components/AdminPanelModal.jsx';
 import {
@@ -18,12 +25,17 @@ import {
   getTranslation
 } from './i18n/translations.js';
 import {
+  GUEST_SCOPE_KEY,
   clearOfflineChats,
   filterChatsByTitle,
+  getUserChatScopeKey,
   loadOfflineState,
+  mergeStoredChats,
   normalizeSettings,
-  readLocalStorageState,
-  saveOfflineState
+  readAppSettings,
+  shouldPersistChatsForScope,
+  saveOfflineState,
+  writeAppSettings
 } from './utils/chatStorage.js';
 import { buildChatHistoryPayload } from './utils/chatHistory.js';
 import {
@@ -39,6 +51,9 @@ import {
   resolveSpeechLocale
 } from './utils/speechDictation.js';
 import {
+  PLUS_QUOTA_PER_KEY,
+  PLUS_QUOTA_STORAGE_KEY,
+  QUOTA_STORAGE_KEY,
   applyMessageSendQuota,
   loadDailyQuotaState,
   reconcileQuotaState,
@@ -52,7 +67,9 @@ import {
   isCreditsCycleExpired,
   loadCreditsState,
   normalizeCreditsState,
-  saveCreditsState
+  saveCreditsState,
+  shouldDeductCreditForReply,
+  shouldUseFallbackLiteModel
 } from './utils/credits.js';
 import {
   clampCredits,
@@ -64,11 +81,17 @@ import {
 } from './utils/authAdmin.js';
 import {
   adminUpdateUserSubscription,
+  clearUserChatsInFirestore,
   consumeUserCreditInFirestore,
+  deleteUserChatInFirestore,
+  fetchAdminDashboardData,
+  recordModelUsageInFirestore,
   renewExpiredCycleInFirestore,
   subscribeAdminDashboardData,
+  subscribeUserChats,
   subscribeUserProfile,
-  syncUserProfileOnSignIn
+  syncUserProfileOnSignIn,
+  upsertUserChatInFirestore
 } from './services/userAccountService.js';
 import { buildSharePayload, shareOrCopyApp } from './utils/shareApp.js';
 
@@ -198,12 +221,92 @@ function ShareIcon() {
   );
 }
 
+function ModelsIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 3l8 4.5-8 4.5-8-4.5L12 3z" />
+      <path d="M4 12l8 4.5 8-4.5" />
+      <path d="M4 16.5L12 21l8-4.5" />
+    </svg>
+  );
+}
+
+function ChevronDownIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M6 9l6 6 6-6" />
+    </svg>
+  );
+}
+
+function CheckIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M5 12.5l4.5 4.5L19 7.5" />
+    </svg>
+  );
+}
+
+function DeepThinkIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="12" cy="12" r="9" />
+      <path d="M3.6 9h16.8M3.6 15h16.8" />
+      <path d="M12 3a13.5 13.5 0 0 1 0 18M12 3a13.5 13.5 0 0 0 0 18" />
+    </svg>
+  );
+}
+
+function ImageCreateIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <rect x="3" y="4" width="18" height="16" rx="3" />
+      <circle cx="8.5" cy="9.5" r="1.5" />
+      <path d="M21 15l-4.5-4.5L7 20" />
+    </svg>
+  );
+}
+
+function ExternalLinkIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M14 5h5v5" />
+      <path d="M10 14L19 5" />
+      <path d="M19 13v5a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5" />
+    </svg>
+  );
+}
+
+function sanitizeClientSources(rawSources) {
+  if (!Array.isArray(rawSources) || rawSources.length === 0) return [];
+  const seen = new Set();
+  const list = [];
+  for (const item of rawSources) {
+    const rawUri = typeof item?.uri === 'string' ? item.uri.trim() : '';
+    if (!rawUri) continue;
+    try {
+      const parsed = new URL(rawUri);
+      if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') continue;
+      const uri = parsed.toString();
+      if (seen.has(uri)) continue;
+      seen.add(uri);
+      list.push({
+        title: (typeof item?.title === 'string' && item.title.trim() ? item.title.trim() : parsed.hostname).slice(0, 180),
+        uri
+      });
+      if (list.length >= 8) break;
+    } catch {
+      continue;
+    }
+  }
+  return list;
+}
+
 export default function App() {
-  const initialLocal = useMemo(() => readLocalStorageState(), []);
-  const [chats, setChats] = useState(initialLocal.chats);
-  const [activeChatId, setActiveChatId] = useState(initialLocal.activeChatId);
-  const [settings, setSettings] = useState(() => normalizeSettings(initialLocal.settings));
-  const [storageReady, setStorageReady] = useState(false);
+  const [chats, setChats] = useState([]);
+  const [activeChatId, setActiveChatId] = useState(null);
+  const [settings, setSettings] = useState(() => normalizeSettings(readAppSettings()));
+  const [loadedScopeKey, setLoadedScopeKey] = useState(null);
   const [isOnline, setIsOnline] = useState(
     typeof navigator !== 'undefined' ? navigator.onLine !== false : true
   );
@@ -213,16 +316,23 @@ export default function App() {
   const [error, setError] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [attachMenuOpen, setAttachMenuOpen] = useState(false);
+  const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [imageMode, setImageMode] = useState(false);
   const [historyQuery, setHistoryQuery] = useState('');
+  const [renamingChatId, setRenamingChatId] = useState(null);
+  const [renamingTitle, setRenamingTitle] = useState('');
   const [isListening, setIsListening] = useState(false);
   const [credits, setCredits] = useState(() => loadCreditsState());
   const [creditsExhaustedHighlight, setCreditsExhaustedHighlight] = useState(false);
   const [globalCapacityExhausted, setGlobalCapacityExhausted] = useState(false);
   const [dailyQuota, setDailyQuota] = useState(() => {
-    const saved = loadDailyQuotaState();
+    const saved = loadDailyQuotaState(undefined, QUOTA_STORAGE_KEY);
     return saved ? reconcileQuotaState(saved, {}) : null;
+  });
+  const [plusDailyQuota, setPlusDailyQuota] = useState(() => {
+    const saved = loadDailyQuotaState(undefined, PLUS_QUOTA_STORAGE_KEY);
+    return saved ? reconcileQuotaState(saved, { quotaPerKey: PLUS_QUOTA_PER_KEY }) : null;
   });
   const [currentUser, setCurrentUser] = useState(null);
   const [authReady, setAuthReady] = useState(false);
@@ -233,6 +343,11 @@ export default function App() {
   const [adminModalOpen, setAdminModalOpen] = useState(false);
   const [adminUsersList, setAdminUsersList] = useState([]);
   const [adminAnalytics, setAdminAnalytics] = useState({ totalVisits: 0, registeredUsersCount: 0 });
+  const [adminQuotaAnalytics, setAdminQuotaAnalytics] = useState({
+    cycleStartedAt: 0,
+    plusPlusUsed: 0,
+    plusUsed: 0
+  });
   const [shareStatus, setShareStatus] = useState(null);
   const shareTimerRef = useRef(null);
 
@@ -240,10 +355,16 @@ export default function App() {
   const pdfInputRef = useRef(null);
   const composerRef = useRef(null);
   const messageInputRef = useRef(null);
+  const renameInputRef = useRef(null);
   const recognitionRef = useRef(null);
   const voiceBaseTextRef = useRef('');
   const voiceFinalTextRef = useRef('');
   const voiceLatestTextRef = useRef('');
+  const activeScopeRef = useRef(GUEST_SCOPE_KEY);
+  const knownRemoteChatIdsRef = useRef(new Set());
+  const deletedChatIdsRef = useRef(new Set());
+  const chatsRef = useRef(chats);
+  chatsRef.current = chats;
 
   const isSpeechSupported = Boolean(
     getSpeechRecognitionConstructor(typeof window !== 'undefined' ? window : null)
@@ -251,6 +372,8 @@ export default function App() {
 
   const langMeta = getLanguageMeta(settings.lang);
   const t = getTranslation(langMeta.code);
+  const activeModelTier = normalizeModelTier(settings.selectedModel);
+  const activeModelOption = MODEL_SELECTOR_OPTIONS.find((opt) => opt.id === activeModelTier) || MODEL_SELECTOR_OPTIONS[0];
   const activeChat = chats.find((c) => c.id === activeChatId) || null;
   const filteredChats = useMemo(
     () => filterChatsByTitle(chats, historyQuery),
@@ -258,19 +381,11 @@ export default function App() {
   );
   const messages = activeChat?.messages || [];
 
-  useEffect(() => {
-    let cancelled = false;
-    loadOfflineState().then((hydrated) => {
-      if (cancelled) return;
-      setChats(hydrated.chats);
-      setActiveChatId(hydrated.activeChatId);
-      setSettings(hydrated.settings);
-      setStorageReady(true);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const activeScopeKey = useMemo(
+    () => getUserChatScopeKey(currentUser?.uid || ''),
+    [currentUser?.uid]
+  );
+  activeScopeRef.current = activeScopeKey;
 
   useEffect(() => {
     const handleOnline = () => {
@@ -302,29 +417,92 @@ export default function App() {
   }, [sidebarOpen]);
 
   useEffect(() => {
-    if (!storageReady) return;
-    saveOfflineState({ chats, activeChatId, settings });
-  }, [chats, activeChatId, settings, storageReady]);
+    writeAppSettings(settings);
+  }, [settings]);
+
+  useEffect(() => {
+    if (!shouldPersistChatsForScope(activeScopeKey, loadedScopeKey)) return;
+    saveOfflineState({ chats, activeChatId, settings }, activeScopeKey);
+  }, [chats, activeChatId, settings, activeScopeKey, loadedScopeKey]);
 
   useEffect(() => {
     const storageKey = getUserCreditsStorageKey(currentUser?.uid || '');
     saveCreditsState(credits, storageKey);
   }, [credits, currentUser?.uid]);
 
+  useEffect(() => {
+    if (credits.remaining <= 0 && activeModelTier !== FAST_MODEL_TIER) {
+      setSettings((prev) => normalizeSettings({ ...prev, selectedModel: FAST_MODEL_TIER }));
+    }
+  }, [credits.remaining, activeModelTier]);
+
+  useEffect(() => {
+    if (!renamingChatId) return;
+    const inputEl = renameInputRef.current;
+    if (!inputEl) return;
+    inputEl.focus();
+    try {
+      const len = inputEl.value.length;
+      inputEl.setSelectionRange(len, len);
+    } catch {
+      // Ignore selection errors on unsupported input types.
+    }
+  }, [renamingChatId]);
+
   const userIsAdmin = useMemo(() => isAdminUser(currentUser), [currentUser]);
   const userIsUnverifiedAdmin = useMemo(() => isAdminEmailUnverified(currentUser), [currentUser]);
 
+  const syncChatToCloud = useCallback((uid, chatObj) => {
+    if (!uid || !chatObj) return;
+    const isKnownRemote = knownRemoteChatIdsRef.current.has(chatObj.id);
+    upsertUserChatInFirestore(uid, chatObj, { isKnownRemote })
+      .then(() => {
+        knownRemoteChatIdsRef.current.add(chatObj.id);
+      })
+      .catch((err) => {
+        console.error('Failed syncing chat to Firestore:', err);
+      });
+  }, []);
+
   useEffect(() => {
     let unsubProfile = null;
+    let unsubChats = null;
     let cancelled = false;
+    let previousUid = null;
 
     const unsubAuth = onAuthStateChanged(auth, async (firebaseUser) => {
       if (unsubProfile) {
         unsubProfile();
         unsubProfile = null;
       }
+      if (unsubChats) {
+        unsubChats();
+        unsubChats = null;
+      }
 
       if (cancelled) return;
+
+      const nextUid = firebaseUser?.uid || null;
+      const nextScopeKey = getUserChatScopeKey(nextUid || '');
+      const switchedAccount = previousUid !== nextUid;
+      previousUid = nextUid;
+      activeScopeRef.current = nextScopeKey;
+
+      // Immediately clear previous account's in-memory UI state before hydrating the new account.
+      setLoadedScopeKey(null);
+      setChats([]);
+      setActiveChatId(null);
+      if (switchedAccount) {
+        setInput('');
+        setAttachments([]);
+        setHistoryQuery('');
+        setError('');
+        setIsSending(false);
+        setCreditsExhaustedHighlight(false);
+      }
+      knownRemoteChatIdsRef.current = new Set();
+      deletedChatIdsRef.current = new Set();
+
       setCurrentUser(firebaseUser || null);
       setAuthReady(true);
 
@@ -333,11 +511,22 @@ export default function App() {
         setAdminModalOpen(false);
         setAdminUsersList([]);
         setCredits(loadCreditsState());
+        const guestHydrated = await loadOfflineState(GUEST_SCOPE_KEY);
+        if (cancelled || activeScopeRef.current !== GUEST_SCOPE_KEY) return;
+        setChats(guestHydrated.chats);
+        setActiveChatId(guestHydrated.activeChatId);
+        setLoadedScopeKey(GUEST_SCOPE_KEY);
         return;
       }
 
       const cachedKey = getUserCreditsStorageKey(firebaseUser.uid);
       setCredits(loadCreditsState(getLocalDateKey(), Date.now(), DAILY_FREE_CREDITS, cachedKey));
+
+      const userHydrated = await loadOfflineState(nextScopeKey);
+      if (cancelled || activeScopeRef.current !== nextScopeKey) return;
+      setChats(userHydrated.chats);
+      setActiveChatId(userHydrated.activeChatId);
+      setLoadedScopeKey(nextScopeKey);
 
       try {
         await syncUserProfileOnSignIn(firebaseUser);
@@ -345,11 +534,12 @@ export default function App() {
         console.error('Failed syncing user profile:', err);
       }
 
-      if (cancelled) return;
+      if (cancelled || activeScopeRef.current !== nextScopeKey) return;
+
       unsubProfile = subscribeUserProfile(
         firebaseUser.uid,
         (profileData) => {
-          if (cancelled) return;
+          if (cancelled || activeScopeRef.current !== nextScopeKey) return;
           setUserProfile(profileData);
           const nowMs = Date.now();
           const todayKey = getLocalDateKey(new Date(nowMs));
@@ -372,12 +562,38 @@ export default function App() {
           console.error('User profile subscription error:', subErr);
         }
       );
+
+      unsubChats = subscribeUserChats(
+        firebaseUser.uid,
+        (remoteChats) => {
+          if (cancelled || activeScopeRef.current !== nextScopeKey) return;
+          for (const chat of remoteChats) {
+            knownRemoteChatIdsRef.current.add(chat.id);
+          }
+          const filteredRemote = remoteChats.filter(
+            (chat) => !deletedChatIdsRef.current.has(chat.id)
+          );
+          setChats((prev) => {
+            const merged = mergeStoredChats(filteredRemote, prev);
+            setActiveChatId((currentActive) => (
+              currentActive && merged.some((c) => c.id === currentActive)
+                ? currentActive
+                : (merged[0]?.id || null)
+            ));
+            return merged;
+          });
+        },
+        (chatsErr) => {
+          console.error('User chats subscription error:', chatsErr);
+        }
+      );
     });
 
     return () => {
       cancelled = true;
       unsubAuth();
       if (unsubProfile) unsubProfile();
+      if (unsubChats) unsubChats();
     };
   }, []);
 
@@ -385,12 +601,14 @@ export default function App() {
     if (!authReady || !userIsAdmin) {
       setAdminUsersList([]);
       setAdminAnalytics({ totalVisits: 0, registeredUsersCount: 0 });
+      setAdminQuotaAnalytics({ cycleStartedAt: 0, plusPlusUsed: 0, plusUsed: 0 });
       return undefined;
     }
 
     const unsubAdmin = subscribeAdminDashboardData({
       onUsers: (rows) => setAdminUsersList(rows),
       onAnalytics: (stats) => setAdminAnalytics(stats),
+      onQuotaAnalytics: (qStats) => setAdminQuotaAnalytics(qStats),
       onError: (err) => {
         console.error('Admin dashboard subscription error:', err);
       }
@@ -405,23 +623,71 @@ export default function App() {
       if (!response.ok) return;
       const serverMeta = await response.json().catch(() => null);
       if (!serverMeta || typeof serverMeta.validKeyCount !== 'number') return;
+
+      const plusPlusMeta = serverMeta?.models?.[SUPER_MODEL_TIER] || serverMeta;
+      const plusMeta = serverMeta?.models?.[FAST_MODEL_TIER] || {
+        validKeyCount: serverMeta.validKeyCount,
+        exhaustedKeyCount: 0,
+        quotaPerKey: PLUS_QUOTA_PER_KEY
+      };
+
       setDailyQuota((prev) => {
-        const next = reconcileQuotaState(prev || loadDailyQuotaState(), serverMeta, Date.now());
-        saveDailyQuotaState(next);
+        const next = reconcileQuotaState(
+          prev || loadDailyQuotaState(undefined, QUOTA_STORAGE_KEY),
+          plusPlusMeta,
+          Date.now()
+        );
+        saveDailyQuotaState(next, undefined, QUOTA_STORAGE_KEY);
         setGlobalCapacityExhausted(next.validKeyCount > 0 && next.remaining === 0);
+        return next;
+      });
+      setPlusDailyQuota((prev) => {
+        const next = reconcileQuotaState(
+          prev || loadDailyQuotaState(undefined, PLUS_QUOTA_STORAGE_KEY),
+          { ...plusMeta, quotaPerKey: plusMeta.quotaPerKey || PLUS_QUOTA_PER_KEY },
+          Date.now()
+        );
+        saveDailyQuotaState(next, undefined, PLUS_QUOTA_STORAGE_KEY);
         return next;
       });
     } catch {
       setDailyQuota((prev) => {
-        const base = prev || loadDailyQuotaState();
+        const base = prev || loadDailyQuotaState(undefined, QUOTA_STORAGE_KEY);
         if (!base) return prev;
         const next = reconcileQuotaState(base, {}, Date.now());
-        saveDailyQuotaState(next);
+        saveDailyQuotaState(next, undefined, QUOTA_STORAGE_KEY);
         setGlobalCapacityExhausted(next.validKeyCount > 0 && next.remaining === 0);
+        return next;
+      });
+      setPlusDailyQuota((prev) => {
+        const base = prev || loadDailyQuotaState(undefined, PLUS_QUOTA_STORAGE_KEY);
+        if (!base) return prev;
+        const next = reconcileQuotaState(base, { quotaPerKey: PLUS_QUOTA_PER_KEY }, Date.now());
+        saveDailyQuotaState(next, undefined, PLUS_QUOTA_STORAGE_KEY);
         return next;
       });
     }
   }, []);
+
+  const handleRefreshAdminDashboard = useCallback(async () => {
+    const tasks = [syncServerQuota()];
+    if (userIsAdmin) {
+      tasks.push(
+        fetchAdminDashboardData().then((fresh) => {
+          if (Array.isArray(fresh?.users)) {
+            setAdminUsersList(fresh.users);
+          }
+          if (fresh?.analytics) {
+            setAdminAnalytics(fresh.analytics);
+          }
+          if (fresh?.quotaAnalytics) {
+            setAdminQuotaAnalytics(fresh.quotaAnalytics);
+          }
+        })
+      );
+    }
+    await Promise.all(tasks);
+  }, [syncServerQuota, userIsAdmin]);
 
   useEffect(() => {
     syncServerQuota();
@@ -430,8 +696,17 @@ export default function App() {
         if (!prev) return prev;
         const next = reconcileQuotaState(prev, {}, Date.now());
         if (next.cycleStartedAt !== prev.cycleStartedAt || next.remaining !== prev.remaining) {
-          saveDailyQuotaState(next);
+          saveDailyQuotaState(next, undefined, QUOTA_STORAGE_KEY);
           setGlobalCapacityExhausted(next.validKeyCount > 0 && next.remaining === 0);
+          return next;
+        }
+        return prev;
+      });
+      setPlusDailyQuota((prev) => {
+        if (!prev) return prev;
+        const next = reconcileQuotaState(prev, { quotaPerKey: PLUS_QUOTA_PER_KEY }, Date.now());
+        if (next.cycleStartedAt !== prev.cycleStartedAt || next.remaining !== prev.remaining) {
+          saveDailyQuotaState(next, undefined, PLUS_QUOTA_STORAGE_KEY);
           return next;
         }
         return prev;
@@ -487,25 +762,63 @@ export default function App() {
   }, [attachMenuOpen]);
 
   useEffect(() => {
+    if (!modelMenuOpen) return undefined;
+    const handleOutsideClick = (event) => {
+      if (event.target instanceof Element && !event.target.closest('.model-dropdown-wrap')) {
+        setModelMenuOpen(false);
+      }
+    };
+    const handleKeyDownClose = (event) => {
+      if (event.key === 'Escape') setModelMenuOpen(false);
+    };
+    document.addEventListener('click', handleOutsideClick);
+    document.addEventListener('keydown', handleKeyDownClose);
+    return () => {
+      document.removeEventListener('click', handleOutsideClick);
+      document.removeEventListener('keydown', handleKeyDownClose);
+    };
+  }, [modelMenuOpen]);
+
+  useEffect(() => {
     scrollToBottom();
   }, [activeChatId, messages.length, isSending]);
+
+  const commitChatRename = useCallback((chatId, rawTitle) => {
+    const nextTitle = typeof rawTitle === 'string' ? rawTitle.trim().slice(0, 80) : '';
+    setRenamingChatId(null);
+    setRenamingTitle('');
+    if (!chatId || !nextTitle) return;
+    const uid = currentUser?.uid || '';
+    setChats((prev) =>
+      prev.map((chat) => {
+        if (chat.id !== chatId || chat.title === nextTitle) return chat;
+        const updated = { ...chat, title: nextTitle, updatedAt: Date.now() };
+        if (uid) syncChatToCloud(uid, updated);
+        return updated;
+      })
+    );
+  }, [currentUser?.uid, syncChatToCloud]);
 
   useEffect(() => {
     const handleExternalRename = (event) => {
       const detail = event?.detail;
       const nextTitle = typeof detail?.title === 'string' ? detail.title.trim().slice(0, 80) : '';
       if (!nextTitle) return;
+      const uid = currentUser?.uid || '';
       setChats((prev) =>
-        prev.map((chat) =>
-          (detail.chatId && chat.id === detail.chatId) || (!detail.chatId && chat.title === detail.previousTitle)
-            ? { ...chat, title: nextTitle, updatedAt: Date.now() }
-            : chat
-        )
+        prev.map((chat) => {
+          const matches = (detail.chatId && chat.id === detail.chatId)
+            || (!detail.chatId && chat.title === detail.previousTitle);
+          if (!matches) return chat;
+          const updated = { ...chat, title: nextTitle, updatedAt: Date.now() };
+          if (uid) syncChatToCloud(uid, updated);
+          return updated;
+        })
       );
     };
     window.addEventListener('zaka-chat-rename', handleExternalRename);
     return () => window.removeEventListener('zaka-chat-rename', handleExternalRename);
-  }, []);
+  }, [currentUser?.uid, syncChatToCloud]);
 
   const stopVoiceDictation = useCallback((abortImmediately = false) => {
     const recognition = recognitionRef.current;
@@ -610,17 +923,19 @@ export default function App() {
     setSettings((prev) => normalizeSettings({ ...prev, [key]: value }));
   }
 
-  function updateMessageInChat(chatId, messageId, updater) {
+  function updateMessageInChat(chatId, messageId, updater, { syncCloud = false } = {}) {
+    const uid = currentUser?.uid || '';
     setChats((prev) =>
-      prev.map((chat) =>
-        chat.id === chatId
-          ? {
-              ...chat,
-              updatedAt: Date.now(),
-              messages: chat.messages.map((m) => (m.id === messageId ? updater(m) : m))
-            }
-          : chat
-      )
+      prev.map((chat) => {
+        if (chat.id !== chatId) return chat;
+        const updated = {
+          ...chat,
+          updatedAt: Date.now(),
+          messages: chat.messages.map((m) => (m.id === messageId ? updater(m) : m))
+        };
+        if (syncCloud && uid) syncChatToCloud(uid, updated);
+        return updated;
+      })
     );
   }
 
@@ -640,10 +955,22 @@ export default function App() {
 
   async function handleSignOut() {
     try {
-      await signOut(auth);
+      stopVoiceDictation(true);
+      setLoadedScopeKey(null);
+      setChats([]);
+      setActiveChatId(null);
+      setInput('');
+      setAttachments([]);
+      setHistoryQuery('');
+      setRenamingChatId(null);
+      setRenamingTitle('');
+      setCreditsExhaustedHighlight(false);
+      knownRemoteChatIdsRef.current = new Set();
+      deletedChatIdsRef.current = new Set();
       setAdminModalOpen(false);
       setSidebarOpen(false);
       setError('');
+      await signOut(auth);
     } catch (err) {
       setError(err instanceof Error ? err.message : t.genericError);
     }
@@ -691,6 +1018,12 @@ export default function App() {
   }
 
   function handleDeleteChat(chatId) {
+    if (renamingChatId === chatId) {
+      setRenamingChatId(null);
+      setRenamingTitle('');
+    }
+    deletedChatIdsRef.current.add(chatId);
+    knownRemoteChatIdsRef.current.delete(chatId);
     setChats((prev) => {
       const next = prev.filter((c) => c.id !== chatId);
       if (activeChatId === chatId) {
@@ -698,13 +1031,28 @@ export default function App() {
       }
       return next;
     });
+    if (currentUser?.uid) {
+      deleteUserChatInFirestore(currentUser.uid, chatId).catch((err) => {
+        console.error('Failed deleting chat from Firestore:', err);
+      });
+    }
   }
 
   async function handleClearHistory() {
+    const existingIds = chatsRef.current.map((c) => c.id);
+    for (const id of existingIds) {
+      deletedChatIdsRef.current.add(id);
+      knownRemoteChatIdsRef.current.delete(id);
+    }
     setChats([]);
     setActiveChatId(null);
     setSettingsOpen(false);
-    await clearOfflineChats(settings);
+    await clearOfflineChats(settings, activeScopeKey);
+    if (currentUser?.uid && existingIds.length > 0) {
+      clearUserChatsInFirestore(currentUser.uid, existingIds).catch((err) => {
+        console.error('Failed clearing user chats in Firestore:', err);
+      });
+    }
   }
 
   async function handleFileSelect(event) {
@@ -803,13 +1151,19 @@ export default function App() {
     ) {
       setCredits(currentCredits);
     }
-    if (currentCredits.remaining <= 0) {
+    const wantsImage = imageMode || (trimmed && isImageGenerationRequest(trimmed));
+    if (wantsImage && currentCredits.remaining <= 0) {
       setCreditsExhaustedHighlight(true);
       setError('');
       return;
     }
 
-    const wantsImage = imageMode || (trimmed && isImageGenerationRequest(trimmed));
+    const useFallbackMode = shouldUseFallbackLiteModel({
+      creditsRemaining: currentCredits.remaining,
+      globalCapacityExhausted,
+      wantsImage,
+      selectedModel: activeModelTier
+    });
 
     const userText = trimmed || '📎';
     const now = Date.now();
@@ -821,8 +1175,10 @@ export default function App() {
       attachments: attachments.map(({ name, mimeType, data }) => ({ name, mimeType, data }))
     };
 
+    const ownerUid = currentUser.uid;
     let targetChatId = activeChatId;
     let existingMessages = messages;
+    let chatAfterUserMsg = null;
 
     if (!targetChatId) {
       targetChatId = createId('chat');
@@ -834,10 +1190,20 @@ export default function App() {
         updatedAt: now,
         messages: [userMessage]
       };
+      chatAfterUserMsg = newChat;
       setChats((prev) => [newChat, ...prev]);
       setActiveChatId(targetChatId);
       existingMessages = [];
     } else {
+      const existingChat = chatsRef.current.find((c) => c.id === targetChatId);
+      if (existingChat) {
+        chatAfterUserMsg = {
+          ...existingChat,
+          updatedAt: now,
+          title: existingChat.messages.length === 0 ? userText.slice(0, 48) : existingChat.title,
+          messages: [...existingChat.messages, userMessage]
+        };
+      }
       setChats((prev) =>
         prev.map((chat) =>
           chat.id === targetChatId
@@ -850,6 +1216,10 @@ export default function App() {
             : chat
         )
       );
+    }
+
+    if (chatAfterUserMsg) {
+      syncChatToCloud(ownerUid, chatAfterUserMsg);
     }
 
     const outgoingAttachments = attachments.map(({ mimeType, data }) => ({ mimeType, data }));
@@ -886,15 +1256,20 @@ export default function App() {
 
       try {
         const result = await generateImageViaApi(trimmed);
-        updateMessageInChat(targetChatId, imageMessageId, (m) => ({
-          ...m,
-          englishPrompt: result.englishPrompt,
-          imageUrl: result.imageUrl,
-          imageSeed: result.seed,
-          imageModel: result.model || 'flux',
-          imageError: false,
-          imageErrorMessage: ''
-        }));
+        updateMessageInChat(
+          targetChatId,
+          imageMessageId,
+          (m) => ({
+            ...m,
+            englishPrompt: result.englishPrompt,
+            imageUrl: result.imageUrl,
+            imageSeed: result.seed,
+            imageModel: result.model || 'flux',
+            imageError: false,
+            imageErrorMessage: ''
+          }),
+          { syncCloud: true }
+        );
         setCredits((prev) => {
           const limit = clampDailyLimit(userProfile?.dailyLimit || prev.dailyLimit);
           const next = consumeOneCredit(prev, getLocalDateKey(), Date.now(), limit);
@@ -915,12 +1290,17 @@ export default function App() {
         if (isQuotaExhaustedResponse(0, null, rawErrMsg)) {
           setGlobalCapacityExhausted(true);
         }
-        updateMessageInChat(targetChatId, imageMessageId, (m) => ({
-          ...m,
-          imageLoading: false,
-          imageError: true,
-          imageErrorMessage: friendlyErr
-        }));
+        updateMessageInChat(
+          targetChatId,
+          imageMessageId,
+          (m) => ({
+            ...m,
+            imageLoading: false,
+            imageError: true,
+            imageErrorMessage: friendlyErr
+          }),
+          { syncCloud: true }
+        );
       }
       return;
     }
@@ -939,7 +1319,9 @@ export default function App() {
           messages: historyPayload,
           attachments: outgoingAttachments.length ? outgoingAttachments : undefined,
           systemInstruction: settings.systemInstruction.trim() || undefined,
-          model: GEMINI_HYDROGEN_MODEL_ID,
+          selectedModel: activeModelTier,
+          model: useFallbackMode ? GEMINI_FALLBACK_LITE_MODEL_ID : GEMINI_HYDROGEN_MODEL_ID,
+          useFallbackOnly: useFallbackMode,
           deepThinking: settings.deepThinking
         })
       });
@@ -983,43 +1365,117 @@ export default function App() {
         throw new Error(data?.error || data?.message || t.genericError);
       }
 
-      setGlobalCapacityExhausted(false);
+      const usedFallback = Boolean(data?.usedFallback);
+      const primaryExhausted = Boolean(data?.primaryCapacityExhausted);
+      const usedPlusPlus = data?.usedTier === SUPER_MODEL_TIER
+        || (!data?.usedTier && !usedFallback && data?.model === GEMINI_HYDROGEN_MODEL_ID);
+      setGlobalCapacityExhausted(primaryExhausted || (useFallbackMode && globalCapacityExhausted));
 
-      const successQuotaMeta = data?.quotaMeta && typeof data.quotaMeta === 'object'
-        ? { ...data.quotaMeta, reachedModel: true, succeeded: true }
-        : { reachedModel: true, succeeded: true };
-      setDailyQuota((prev) => {
-        const base = prev || loadDailyQuotaState();
-        const next = applyMessageSendQuota(base, successQuotaMeta, Date.now());
-        saveDailyQuotaState(next);
-        return next;
-      });
-
-      setCredits((prev) => {
-        const limit = clampDailyLimit(userProfile?.dailyLimit || prev.dailyLimit);
-        const next = consumeOneCredit(prev, getLocalDateKey(), Date.now(), limit);
-        saveCreditsState(next, getUserCreditsStorageKey(currentUser?.uid || ''));
-        return next;
-      });
-      if (currentUser?.uid && userProfile) {
-        consumeUserCreditInFirestore(currentUser.uid, userProfile).catch((consumeErr) => {
-          console.error('Failed syncing consumed message credit:', consumeErr);
+      if (usedPlusPlus) {
+        const plusPlusMeta = data?.quotaMeta && typeof data.quotaMeta === 'object'
+          ? {
+              ...data.quotaMeta,
+              reachedModel: true,
+              succeeded: true
+            }
+          : {
+              reachedModel: true,
+              succeeded: true
+            };
+        setDailyQuota((prev) => {
+          const base = prev || loadDailyQuotaState(undefined, QUOTA_STORAGE_KEY);
+          const next = applyMessageSendQuota(base, plusPlusMeta, Date.now());
+          saveDailyQuotaState(next, undefined, QUOTA_STORAGE_KEY);
+          return next;
+        });
+      } else {
+        if (data?.quotaMeta && typeof data.quotaMeta === 'object' && !useFallbackMode) {
+          setDailyQuota((prev) => {
+            const base = prev || loadDailyQuotaState(undefined, QUOTA_STORAGE_KEY);
+            const next = applyMessageSendQuota(base, {
+              ...data.quotaMeta,
+              reachedModel: true,
+              succeeded: false
+            }, Date.now());
+            saveDailyQuotaState(next, undefined, QUOTA_STORAGE_KEY);
+            return next;
+          });
+        }
+        const plusMeta = data?.plusQuotaMeta && typeof data.plusQuotaMeta === 'object'
+          ? {
+              ...data.plusQuotaMeta,
+              quotaPerKey: data.plusQuotaMeta.quotaPerKey || PLUS_QUOTA_PER_KEY,
+              reachedModel: true,
+              succeeded: true
+            }
+          : {
+              quotaPerKey: PLUS_QUOTA_PER_KEY,
+              reachedModel: true,
+              succeeded: true
+            };
+        setPlusDailyQuota((prev) => {
+          const base = prev || loadDailyQuotaState(undefined, PLUS_QUOTA_STORAGE_KEY);
+          const next = applyMessageSendQuota(base, plusMeta, Date.now());
+          saveDailyQuotaState(next, undefined, PLUS_QUOTA_STORAGE_KEY);
+          return next;
         });
       }
 
+      if (currentUser?.uid) {
+        recordModelUsageInFirestore(usedPlusPlus ? SUPER_MODEL_TIER : FAST_MODEL_TIER)
+          .then((updatedQuotaDoc) => {
+            if (updatedQuotaDoc && userIsAdmin) {
+              setAdminQuotaAnalytics(updatedQuotaDoc);
+            }
+          })
+          .catch((quotaSyncErr) => {
+            console.error('Failed syncing model usage counter to Firestore:', quotaSyncErr);
+          });
+      }
+
+      if (shouldDeductCreditForReply({ usedFallback })) {
+        let remainingAfterSend = credits.remaining;
+        setCredits((prev) => {
+          const limit = clampDailyLimit(userProfile?.dailyLimit || prev.dailyLimit);
+          const next = consumeOneCredit(prev, getLocalDateKey(), Date.now(), limit);
+          remainingAfterSend = next.remaining;
+          saveCreditsState(next, getUserCreditsStorageKey(currentUser?.uid || ''));
+          return next;
+        });
+        if (remainingAfterSend <= 0 && activeModelTier !== FAST_MODEL_TIER) {
+          updateSetting('selectedModel', FAST_MODEL_TIER);
+        }
+        if (currentUser?.uid && userProfile) {
+          consumeUserCreditInFirestore(currentUser.uid, userProfile).catch((consumeErr) => {
+            console.error('Failed syncing consumed message credit:', consumeErr);
+          });
+        }
+      } else if (usedFallback && activeModelTier !== FAST_MODEL_TIER) {
+        updateSetting('selectedModel', FAST_MODEL_TIER);
+      }
+
+      const safeSources = sanitizeClientSources(data?.sources);
       const assistantMessage = {
         id: createId('msg'),
         role: 'assistant',
         content: replyText,
+        ...(safeSources.length > 0 ? { sources: safeSources } : {}),
         createdAt: Date.now()
       };
 
       setChats((prev) =>
-        prev.map((chat) =>
-          chat.id === targetChatId
-            ? { ...chat, updatedAt: Date.now(), messages: [...chat.messages, assistantMessage] }
-            : chat
-        )
+        prev.map((chat) => {
+          if (chat.id !== targetChatId) return chat;
+          const updated = {
+            ...chat,
+            updatedAt: Date.now(),
+            messages: [...chat.messages, assistantMessage]
+          };
+          if (activeScopeRef.current === getUserChatScopeKey(ownerUid)) {
+            syncChatToCloud(ownerUid, updated);
+          }
+          return updated;
+        })
       );
     } catch (err) {
       const msg = err instanceof Error && err.message ? err.message : t.genericError;
@@ -1042,11 +1498,16 @@ export default function App() {
   }
 
   function handleImageLoad(chatId, messageId) {
-    updateMessageInChat(chatId, messageId, (m) => ({
-      ...m,
-      imageLoading: false,
-      imageError: false
-    }));
+    updateMessageInChat(
+      chatId,
+      messageId,
+      (m) => ({
+        ...m,
+        imageLoading: false,
+        imageError: false
+      }),
+      { syncCloud: true }
+    );
     scrollToBottom();
   }
 
@@ -1068,12 +1529,17 @@ export default function App() {
       }));
       return;
     }
-    updateMessageInChat(chatId, msg.id, (m) => ({
-      ...m,
-      imageLoading: false,
-      imageError: true,
-      imageErrorMessage: m.imageErrorMessage || t.imageLoadError
-    }));
+    updateMessageInChat(
+      chatId,
+      msg.id,
+      (m) => ({
+        ...m,
+        imageLoading: false,
+        imageError: true,
+        imageErrorMessage: m.imageErrorMessage || t.imageLoadError
+      }),
+      { syncCloud: true }
+    );
   }
 
   return (
@@ -1143,30 +1609,87 @@ export default function App() {
           ) : filteredChats.length === 0 ? (
             <div className="history-empty">{t.noSearchResults}</div>
           ) : (
-            filteredChats.map((chat) => (
-              <div
-                key={chat.id}
-                className={`history-entry ${chat.id === activeChatId ? 'history-entry-active' : ''}`}
-              >
-                <button
-                  type="button"
-                  className="history-select"
-                  data-chat-id={chat.id}
-                  onClick={() => handleSelectChat(chat.id)}
+            filteredChats.map((chat) => {
+              const isRenaming = renamingChatId === chat.id;
+              return (
+                <div
+                  key={chat.id}
+                  className={`history-entry ${chat.id === activeChatId ? 'history-entry-active' : ''} ${isRenaming ? 'history-entry-renaming' : ''}`}
                 >
-                  <span className="history-text">{chat.title}</span>
-                  <span className="history-count">{chat.messages.length}</span>
-                </button>
-                <button
-                  type="button"
-                  className="history-delete"
-                  onClick={() => handleDeleteChat(chat.id)}
-                  aria-label={`Delete ${chat.title}`}
-                >
-                  ×
-                </button>
-              </div>
-            ))
+                  {isRenaming ? (
+                    <div className="history-rename-box" onClick={(e) => e.stopPropagation()}>
+                      <input
+                        ref={renameInputRef}
+                        type="text"
+                        dir="auto"
+                        maxLength={80}
+                        className="history-rename-input"
+                        data-testid="history-rename-input"
+                        aria-label={t.renameChatLabel}
+                        value={renamingTitle}
+                        onChange={(e) => setRenamingTitle(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            commitChatRename(chat.id, renamingTitle);
+                          } else if (e.key === 'Escape') {
+                            e.preventDefault();
+                            setRenamingChatId(null);
+                            setRenamingTitle('');
+                          }
+                        }}
+                        onBlur={() => commitChatRename(chat.id, renamingTitle)}
+                      />
+                      <button
+                        type="button"
+                        className="history-rename-save"
+                        data-testid="history-rename-save"
+                        aria-label={t.saveRenameLabel}
+                        title={t.saveRenameLabel}
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => commitChatRename(chat.id, renamingTitle)}
+                      >
+                        ✓
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        className="history-select"
+                        data-chat-id={chat.id}
+                        onClick={() => handleSelectChat(chat.id)}
+                      >
+                        <span className="history-text">{chat.title}</span>
+                        <span className="history-count">{chat.messages.length}</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="history-rename"
+                        data-testid={`rename-chat-${chat.id}`}
+                        aria-label={`${t.renameChatLabel} ${chat.title}`}
+                        title={t.renameChatLabel}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setRenamingChatId(chat.id);
+                          setRenamingTitle(chat.title || '');
+                        }}
+                      >
+                        ✎
+                      </button>
+                      <button
+                        type="button"
+                        className="history-delete"
+                        onClick={() => handleDeleteChat(chat.id)}
+                        aria-label={`Delete ${chat.title}`}
+                      >
+                        ×
+                      </button>
+                    </>
+                  )}
+                </div>
+              );
+            })
           )}
         </div>
 
@@ -1402,7 +1925,28 @@ export default function App() {
                         )}
                       </div>
                     ) : (
-                      <div className="message-text">{msg.content}</div>
+                      <>
+                        <div className="message-text">{msg.content}</div>
+                        {msg.role === 'assistant' && sanitizeClientSources(msg.sources).length > 0 && (
+                          <div className="message-sources" data-testid="message-sources">
+                            <div className="message-sources-title">{t.sourcesHeading}</div>
+                            <div className="message-sources-list">
+                              {sanitizeClientSources(msg.sources).map((src, idx) => (
+                                <a
+                                  key={`${src.uri}-${idx}`}
+                                  href={src.uri}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="message-source-chip"
+                                >
+                                  <ExternalLinkIcon />
+                                  <span>{src.title}</span>
+                                </a>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </>
                     )}
                   </div>
                 </div>
@@ -1431,12 +1975,6 @@ export default function App() {
               role="alert"
             >
               {error}
-            </div>
-          )}
-
-          {!error && (globalCapacityExhausted || (dailyQuota && dailyQuota.validKeyCount > 0 && dailyQuota.remaining === 0)) && (
-            <div className="global-quota-notice" data-testid="global-quota-banner" role="status">
-              {t.globalQuotaExhaustedMessage}
             </div>
           )}
 
@@ -1476,43 +2014,71 @@ export default function App() {
           )}
 
           <div className="composer-tools">
-            <button
-              type="button"
-              className={`deep-thinking-button ${settings.deepThinking ? 'deep-thinking-active' : ''}`}
-              aria-pressed={settings.deepThinking}
-              onClick={() => updateSetting('deepThinking', !settings.deepThinking)}
-            >
-              <span>✦</span>
-              {t.deepThinking}
-            </button>
-
-            <button
-              type="button"
-              className={`deep-thinking-button image-mode-button ${imageMode ? 'deep-thinking-active' : ''}`}
-              aria-pressed={imageMode}
-              onClick={() => setImageMode((prev) => !prev)}
-            >
-              <span>🎨</span>
-              {t.imageMode}
-            </button>
-
-            <div className="composer-counters">
-              <div
-                className={`credits-inline-meta ${credits.remaining === 0 ? 'credits-inline-empty' : ''}`}
-                data-testid="user-credits-counter"
-                role="status"
-                aria-live="polite"
+            <div className="model-dropdown-wrap">
+              <button
+                type="button"
+                className={`model-dropdown-trigger ${modelMenuOpen ? 'model-dropdown-open' : ''}`}
+                data-testid="models-selector-button"
+                aria-haspopup="listbox"
+                aria-expanded={modelMenuOpen}
+                onClick={() => setModelMenuOpen((open) => !open)}
               >
-                <span>{t.creditsRemainingLabel}:</span>
-                <strong>
-                  {credits.remaining} {credits.remaining === 1 ? t.creditsUnitSingle : t.creditsUnitPlural}
-                </strong>
-              </div>
-            </div>
+                <ModelsIcon />
+                <span className="model-dropdown-caption">{t.modelsButtonLabel}:</span>
+                <strong className="model-dropdown-value">{t[activeModelOption.nameKey]}</strong>
+                <span className="model-dropdown-chevron" aria-hidden="true">
+                  <ChevronDownIcon />
+                </span>
+              </button>
 
-            {settings.deepThinking && (
-              <span className="thinking-hint">{t.deepThinkingHint}</span>
-            )}
+              {modelMenuOpen && (
+                <div
+                  className="model-dropdown-menu"
+                  data-testid="models-selector-menu"
+                  role="listbox"
+                  aria-label={t.modelsButtonLabel}
+                >
+                  {MODEL_SELECTOR_OPTIONS.map((opt) => {
+                    const isSelected = activeModelTier === opt.id;
+                    const isSuperOption = opt.id !== FAST_MODEL_TIER;
+                    const isSuperDepleted = isSuperOption && credits.remaining <= 0;
+                    return (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        role="option"
+                        aria-selected={isSelected}
+                        data-model-option={opt.id}
+                        className={`model-option-item ${isSelected ? 'model-option-selected' : ''} ${isSuperDepleted ? 'model-option-depleted' : ''}`}
+                        onClick={() => {
+                          if (isSuperDepleted) {
+                            updateSetting('selectedModel', FAST_MODEL_TIER);
+                            setCreditsExhaustedHighlight(true);
+                            setModelMenuOpen(false);
+                            return;
+                          }
+                          updateSetting('selectedModel', opt.id);
+                          setModelMenuOpen(false);
+                        }}
+                      >
+                        <div className="model-option-header">
+                          <div className="model-option-titles">
+                            <strong>{t[opt.nameKey]}</strong>
+                            <span className="model-option-subtitle" dir="auto">{t[opt.subtitleKey]}</span>
+                          </div>
+                          {isSelected && (
+                            <span className="model-option-check" aria-hidden="true">
+                              <CheckIcon />
+                            </span>
+                          )}
+                        </div>
+                        <p className="model-option-desc">{t[opt.descKey]}</p>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           </div>
 
           {isListening && (
@@ -1614,6 +2180,34 @@ export default function App() {
               <SendIcon />
             </button>
           </form>
+
+          <div className="composer-tools-bottom" data-testid="composer-tools-bottom">
+            <button
+              type="button"
+              data-testid="deep-thinking-button"
+              className={`deep-thinking-button ${settings.deepThinking ? 'deep-thinking-active' : ''}`}
+              aria-pressed={settings.deepThinking}
+              onClick={() => updateSetting('deepThinking', !settings.deepThinking)}
+            >
+              <DeepThinkIcon />
+              <span>{t.deepThinking}</span>
+            </button>
+
+            <button
+              type="button"
+              data-testid="image-mode-button"
+              className={`deep-thinking-button image-mode-button ${imageMode ? 'deep-thinking-active' : ''}`}
+              aria-pressed={imageMode}
+              onClick={() => setImageMode((prev) => !prev)}
+            >
+              <ImageCreateIcon />
+              <span>{t.imageMode}</span>
+            </button>
+
+            {settings.deepThinking && (
+              <span className="thinking-hint">{t.deepThinkingHint}</span>
+            )}
+          </div>
 
           <p className="composer-disclaimer">{t.disclaimer}</p>
         </div>
@@ -1752,7 +2346,10 @@ export default function App() {
           open={adminModalOpen}
           onClose={() => setAdminModalOpen(false)}
           dailyQuota={dailyQuota}
+          plusDailyQuota={plusDailyQuota}
+          quotaAnalytics={adminQuotaAnalytics}
           onRefreshQuota={syncServerQuota}
+          onRefreshDashboard={handleRefreshAdminDashboard}
           usersList={adminUsersList}
           analytics={adminAnalytics}
           onUpdateUserSubscription={adminUpdateUserSubscription}

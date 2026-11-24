@@ -1,5 +1,14 @@
-import { GEMINI_HYDROGEN_MODEL_ID } from '../../src/shared/modelTiers.js';
-import { getServerQuotaSnapshot } from '../lib/geminiKeys.js';
+import {
+  FAST_MODEL_TIER,
+  GEMINI_FALLBACK_LITE_MODEL_ID,
+  GEMINI_HYDROGEN_MODEL_ID,
+  SUPER_MODEL_TIER
+} from '../../src/shared/modelTiers.js';
+import {
+  DAILY_QUOTA_PER_KEY,
+  PLUS_QUOTA_PER_KEY,
+  getServerQuotaSnapshot
+} from '../lib/geminiKeys.js';
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -16,7 +25,10 @@ function json(payload, status = 200) {
   });
 }
 
-export async function handleQuota({ request, env = {} }) {
+export async function handleQuota({
+  request,
+  env = (typeof process !== 'undefined' && process.env ? process.env : {})
+}) {
   if (request.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: CORS_HEADERS });
   }
@@ -24,8 +36,26 @@ export async function handleQuota({ request, env = {} }) {
     return json({ error: 'Method not allowed' }, 405);
   }
 
-  const snapshot = getServerQuotaSnapshot(env, GEMINI_HYDROGEN_MODEL_ID);
-  return json(snapshot, 200);
+  const plusPlusSnapshot = getServerQuotaSnapshot(
+    env,
+    GEMINI_HYDROGEN_MODEL_ID,
+    Date.now(),
+    DAILY_QUOTA_PER_KEY
+  );
+  const plusSnapshot = getServerQuotaSnapshot(
+    env,
+    GEMINI_FALLBACK_LITE_MODEL_ID,
+    Date.now(),
+    PLUS_QUOTA_PER_KEY
+  );
+
+  return json({
+    ...plusPlusSnapshot,
+    models: {
+      [SUPER_MODEL_TIER]: plusPlusSnapshot,
+      [FAST_MODEL_TIER]: plusSnapshot
+    }
+  }, 200);
 }
 
 export async function onRequestGet(context) {

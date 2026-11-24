@@ -3,13 +3,18 @@ import assert from 'node:assert/strict';
 import {
   ADMIN_EMAIL,
   GLOBAL_ADMIN_CAPACITY_TARGET,
+  PLUS_ADMIN_CAPACITY_TARGET,
+  PLUS_PLUS_ADMIN_CAPACITY_TARGET,
   buildInitialUserProfile,
   clampCredits,
   clampDailyLimit,
   computeAdminCapacitySummary,
+  computeDualModelCapacitySummary,
   filterAndSortUsers,
+  filterUsersDirectory,
   isAdminEmailUnverified,
   isAdminUser,
+  isPaidPlanUser,
   isUserProfileCycleExpired,
   mapFirebaseAuthError
 } from './authAdmin.js';
@@ -85,6 +90,47 @@ test('computes remaining global capacity out of 200 messages for Admin Panel', (
   assert.equal(noKeys.percentRemaining, 0);
 });
 
+test('computes independent capacity for Plus Plus (200) and Plus (10,000) without cross-deduction', () => {
+  assert.equal(PLUS_PLUS_ADMIN_CAPACITY_TARGET, 200);
+  assert.equal(PLUS_ADMIN_CAPACITY_TARGET, 10000);
+
+  const now = 1_700_000_050_000;
+  const summary = computeDualModelCapacitySummary({
+    dailyQuota: { validKeyCount: 10, totalCapacity: 200, remaining: 200, exhaustedKeyCount: 0 },
+    plusDailyQuota: { validKeyCount: 10, totalCapacity: 10000, remaining: 10000, exhaustedKeyCount: 0 },
+    quotaAnalytics: {
+      cycleStartedAt: now - 10_000,
+      plusPlusUsed: 12,
+      plusUsed: 250
+    },
+    now
+  });
+
+  assert.equal(summary.plusPlus.targetCapacity, 200);
+  assert.equal(summary.plusPlus.remaining, 188);
+  assert.equal(summary.plusPlus.used, 12);
+  assert.equal(summary.plusPlus.percentRemaining, 94);
+
+  assert.equal(summary.plus.targetCapacity, 10000);
+  assert.equal(summary.plus.remaining, 9750);
+  assert.equal(summary.plus.used, 250);
+  assert.equal(summary.plus.percentRemaining, 98);
+
+  // After 24h cycle expiration, both reset cleanly back to full capacity
+  const expiredSummary = computeDualModelCapacitySummary({
+    dailyQuota: { validKeyCount: 10, totalCapacity: 200, remaining: 200, exhaustedKeyCount: 0 },
+    plusDailyQuota: { validKeyCount: 10, totalCapacity: 10000, remaining: 10000, exhaustedKeyCount: 0 },
+    quotaAnalytics: {
+      cycleStartedAt: now - 86_400_000,
+      plusPlusUsed: 120,
+      plusUsed: 1400
+    },
+    now
+  });
+  assert.equal(expiredSummary.plusPlus.remaining, 200);
+  assert.equal(expiredSummary.plus.remaining, 10000);
+});
+
 test('checks 24h cycle expiration and clamps admin edits safely', () => {
   const t0 = 1_700_000_000_000;
   assert.equal(isUserProfileCycleExpired({ cycleStartedAt: t0 }, t0 + 86_399_000), false);
@@ -95,18 +141,28 @@ test('checks 24h cycle expiration and clamps admin edits safely', () => {
   assert.equal(clampCredits(-2, 0), 0);
 });
 
-test('filters and sorts registered users by search query and activity timestamp', () => {
+test('filters and sorts registered users and paid subscribers accurately', () => {
   const users = [
     { uid: '1', displayName: 'سارة', email: 'sara@mail.com', plan: 'free', cycleStartedAt: 100 },
     { uid: '2', displayName: 'أحمد', email: 'ahmed@mail.com', plan: 'vip', cycleStartedAt: 300 },
     { uid: '3', displayName: 'نور', email: 'noor@mail.com', plan: 'pro', cycleStartedAt: 200 }
   ];
 
+  assert.equal(isPaidPlanUser(users[0]), false);
+  assert.equal(isPaidPlanUser(users[1]), true);
+  assert.equal(isPaidPlanUser(users[2]), true);
+
   const sorted = filterAndSortUsers(users, '');
   assert.deepEqual(sorted.map((u) => u.uid), ['2', '3', '1']);
 
   const filtered = filterAndSortUsers(users, 'vip');
   assert.deepEqual(filtered.map((u) => u.uid), ['2']);
+
+  const paidOnly = filterUsersDirectory(users, { paidOnly: true });
+  assert.deepEqual(paidOnly.map((u) => u.uid), ['2', '3']);
+
+  const allUsers = filterUsersDirectory(users, { paidOnly: false });
+  assert.deepEqual(allUsers.map((u) => u.uid), ['2', '3', '1']);
 });
 
 test('maps Firebase Auth error codes to localized readable messages', () => {

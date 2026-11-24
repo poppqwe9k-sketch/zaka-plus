@@ -8,7 +8,7 @@ export const POLLINATIONS_IMAGE_BASE = 'https://image.pollinations.ai/prompt';
 export const MYMEMORY_TRANSLATE_URL = 'https://api.mymemory.translated.net/get';
 export const DEFAULT_IMAGE_MODEL = 'flux';
 export const PROMPT_QUALITY_SUFFIX = ', wide angle shot, high quality, detailed';
-const IMAGE_PROMPT_MODELS = ['gemini-4-hydrogen'];
+const IMAGE_PROMPT_MODELS = ['gemini-4-hydrogen', 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite'];
 const UNAVAILABLE_IMAGE_MODELS = new Set();
 
 const CORS_HEADERS = {
@@ -141,7 +141,7 @@ export async function translatePromptWithGemini(userPrompt, {
       if (isUnavailableImageModelError(error)) {
         continue;
       }
-      return '';
+      continue;
     }
   }
 

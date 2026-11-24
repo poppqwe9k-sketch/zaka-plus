@@ -1,6 +1,8 @@
 export const DAILY_QUOTA_PER_KEY = 20;
+export const PLUS_QUOTA_PER_KEY = 1000;
 export const QUOTA_CYCLE_MS = 24 * 60 * 60 * 1000;
 export const QUOTA_STORAGE_KEY = 'zaka-plus-daily-quota-v1';
+export const PLUS_QUOTA_STORAGE_KEY = 'zaka-plus-lite-daily-quota-v1';
 
 function toNonNegInt(value, fallback = 0) {
   if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
@@ -122,10 +124,13 @@ export function applyMessageSendQuota(currentState, quotaMeta = {}, now = Date.n
   };
 }
 
-export function loadDailyQuotaState(storage = typeof localStorage !== 'undefined' ? localStorage : null) {
+export function loadDailyQuotaState(
+  storage = typeof localStorage !== 'undefined' ? localStorage : null,
+  storageKey = QUOTA_STORAGE_KEY
+) {
   if (!storage || typeof storage.getItem !== 'function') return null;
   try {
-    const raw = storage.getItem(QUOTA_STORAGE_KEY);
+    const raw = storage.getItem(storageKey);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     return parsed && typeof parsed === 'object' ? parsed : null;
@@ -134,10 +139,14 @@ export function loadDailyQuotaState(storage = typeof localStorage !== 'undefined
   }
 }
 
-export function saveDailyQuotaState(state, storage = typeof localStorage !== 'undefined' ? localStorage : null) {
+export function saveDailyQuotaState(
+  state,
+  storage = typeof localStorage !== 'undefined' ? localStorage : null,
+  storageKey = QUOTA_STORAGE_KEY
+) {
   if (!storage || typeof storage.setItem !== 'function' || !state) return;
   try {
-    storage.setItem(QUOTA_STORAGE_KEY, JSON.stringify(state));
+    storage.setItem(storageKey, JSON.stringify(state));
   } catch {
     // Ignore storage quota errors cleanly.
   }

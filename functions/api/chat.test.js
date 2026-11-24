@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { onRequestPost } from './chat.js';
 
-test('POST /api/chat always uses gemini-4-hydrogen regardless of selectedModel input', async () => {
+test('POST /api/chat defaults to بلس (gemini-3.5-flash-lite) when selectedModel is omitted or plus', async () => {
   let captured = null;
   const req = new Request('http://localhost:3000/api/chat', {
     method: 'POST',
@@ -18,25 +18,27 @@ test('POST /api/chat always uses gemini-4-hydrogen regardless of selectedModel i
     env: { GEMINI_API_KEY: 'test-key' },
     generateFn: async ({ model, config }) => {
       captured = { model, config };
-      return { text: 'أهلاً بك في ذكاء بلس!' };
+      return { text: 'أهلاً بك في بلس!' };
     }
   });
 
   assert.equal(res.status, 200);
   const body = await res.json();
-  assert.equal(body.reply, 'أهلاً بك في ذكاء بلس!');
-  assert.equal(body.model, 'gemini-4-hydrogen');
-  assert.equal(captured.model, 'gemini-4-hydrogen');
-  assert.equal(captured.config.thinkingConfig.thinkingLevel, 'LOW');
+  assert.equal(body.reply, 'أهلاً بك في بلس!');
+  assert.equal(body.model, 'gemini-3.5-flash-lite');
+  assert.equal(body.modelName, 'بلس');
+  assert.equal(captured.model, 'gemini-3.5-flash-lite');
+  assert.equal(captured.config.thinkingConfig, undefined);
 });
 
-test('POST /api/chat enables XHIGH thinking level when deepThinking is true', async () => {
+test('POST /api/chat enables XHIGH thinking level for بلس بلاس when deepThinking is true', async () => {
   let captured = null;
   const req = new Request('http://localhost:3000/api/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       messages: [{ role: 'user', content: 'حلل هذه الفكرة بعمق' }],
+      selectedModel: 'plus-max',
       deepThinking: true
     })
   });
@@ -69,7 +71,8 @@ test('rotates silently across GEMINI_KEY_1..GEMINI_KEY_19 on 429 Quota exceeded 
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      messages: [{ role: 'user', content: 'مرحبا' }]
+      messages: [{ role: 'user', content: 'مرحبا' }],
+      selectedModel: 'plus-max'
     })
   });
 
@@ -111,7 +114,8 @@ test('rotates across GEMINI_KEY (no 1) and extra GEMINI_*KEY* secrets before ret
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      messages: [{ role: 'user', content: 'اختبار فشل كل المفاتيح' }]
+      messages: [{ role: 'user', content: 'اختبار فشل كل المفاتيح' }],
+      selectedModel: 'plus-max'
     })
   });
 
@@ -133,7 +137,8 @@ test('rotates across GEMINI_KEY (no 1) and extra GEMINI_*KEY* secrets before ret
   assert.equal(seenKeys.includes('key-unnumbered'), true);
   assert.equal(seenKeys.includes('key-2'), true);
   assert.equal(seenKeys.includes('key-backup'), true);
-  assert.equal(seenKeys.length, 3);
+  // 3 keys tried across primary + 2 lite fallback candidates (3 * 3 = 9)
+  assert.equal(seenKeys.length, 9);
 });
 
 test('rotates silently without warning when key #1 returns 401 API key not valid (ACCESS_TOKEN_TYPE_UNSUPPORTED)', async () => {
@@ -185,7 +190,8 @@ test('forwards exact user message to gemini-4-hydrogen and extracts non-thought 
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      messages: [{ role: 'user', content: 'شلونك' }]
+      messages: [{ role: 'user', content: 'شلونك' }],
+      selectedModel: 'plus-max'
     })
   });
 
@@ -216,7 +222,7 @@ test('forwards exact user message to gemini-4-hydrogen and extracts non-thought 
   ]);
   const body = await res.json();
   assert.equal(body.reply, 'أهلاً بك! أنا بخير والحمد لله، كيف يمكنني مساعدتك اليوم؟');
-  assert.equal(body.modelName, 'Plus AI');
+  assert.equal(body.modelName, 'بلس بلاس');
 });
 
 test('never stops early when previous keys were in 429 cooldown; tries every remaining key in env before failing', async () => {
@@ -236,7 +242,8 @@ test('never stops early when previous keys were in 429 cooldown; tries every rem
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      messages: [{ role: 'user', content: 'مرحبا' }]
+      messages: [{ role: 'user', content: 'مرحبا' }],
+      selectedModel: 'plus-max'
     })
   });
 
@@ -285,7 +292,7 @@ test('POST /api/chat returns accurate quotaMeta on success, rotation 429, and pr
   const validReq = new Request('http://localhost:3000/api/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ messages: [{ role: 'user', content: 'مرحبا' }] })
+    body: JSON.stringify({ messages: [{ role: 'user', content: 'مرحبا' }], selectedModel: 'plus-max' })
   });
   const validRes = await onRequestPost({
     request: validReq,
@@ -307,5 +314,249 @@ test('POST /api/chat returns accurate quotaMeta on success, rotation 429, and pr
   assert.equal(validBody.quotaMeta.exhaustedKeyCount, 1);
   assert.equal(validBody.quotaMeta.reachedModel, true);
   assert.equal(validBody.quotaMeta.succeeded, true);
+});
+
+test('auto-falls back to gemini-2.5-flash-lite on same API keys when primary gemini-4-hydrogen exhausts all keys with 429', async () => {
+  const { resetKeyRotationForTests } = await import('../lib/geminiKeys.js');
+  resetKeyRotationForTests();
+
+  const env = {
+    GEMINI_KEY_1: 'k1',
+    GEMINI_KEY_2: 'k2'
+  };
+  const calls = [];
+  const req = new Request('http://localhost:3000/api/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      messages: [{ role: 'user', content: 'مرحبا' }],
+      selectedModel: 'plus-max',
+      deepThinking: true
+    })
+  });
+
+  const res = await onRequestPost({
+    request: req,
+    env,
+    generateFn: async ({ model, apiKey, config }) => {
+      calls.push({ model, apiKey, config });
+      if (model === 'gemini-4-hydrogen') {
+        const err = new Error('Resource has been exhausted (429)');
+        err.status = 429;
+        throw err;
+      }
+      return { text: 'تم الرد تلقائياً عبر الوضع السريع المجاني!' };
+    }
+  });
+
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.reply, 'تم الرد تلقائياً عبر الوضع السريع المجاني!');
+  assert.equal(body.model, 'gemini-3.5-flash-lite');
+  assert.equal(body.usedFallback, true);
+  assert.equal(body.primaryCapacityExhausted, true);
+  assert.equal(body.quotaMeta.exhaustedKeyCount, 2);
+  assert.equal(body.quotaMeta.succeeded, false);
+  // Verified primary tried both keys first, then switched to gemini-3.5-flash-lite
+  assert.deepEqual(calls.map((c) => c.model), ['gemini-4-hydrogen', 'gemini-4-hydrogen', 'gemini-3.5-flash-lite']);
+});
+
+test('uses gemini-3.5-flash-lite directly without calling primary model when useFallbackOnly is true (0 super credits)', async () => {
+  const { resetKeyRotationForTests } = await import('../lib/geminiKeys.js');
+  resetKeyRotationForTests();
+
+  const modelsCalled = [];
+  const req = new Request('http://localhost:3000/api/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      messages: [{ role: 'user', content: 'استمر في الدردشة' }],
+      useFallbackOnly: true
+    })
+  });
+
+  const res = await onRequestPost({
+    request: req,
+    env: { GEMINI_KEY_1: 'k1' },
+    generateFn: async ({ model }) => {
+      modelsCalled.push(model);
+      return { text: 'رد سريع مجاني بلا توقف' };
+    }
+  });
+
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.model, 'gemini-3.5-flash-lite');
+  assert.equal(body.usedFallback, true);
+  assert.deepEqual(modelsCalled, ['gemini-3.5-flash-lite']);
+});
+
+test('enables Google Search grounding when deepThinking is true and returns sanitized web sources', async () => {
+  const { resetKeyRotationForTests } = await import('../lib/geminiKeys.js');
+  resetKeyRotationForTests();
+
+  let capturedConfig = null;
+  const req = new Request('http://localhost:3000/api/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      messages: [{ role: 'user', content: 'ما هي أحدث أخبار التكنولوجيا اليوم؟' }],
+      deepThinking: true
+    })
+  });
+
+  const res = await onRequestPost({
+    request: req,
+    env: { GEMINI_KEY_1: 'k1' },
+    generateFn: async ({ config }) => {
+      capturedConfig = config;
+      return {
+        text: 'إليك أحدث الأخبار من البحث المباشر.',
+        candidates: [
+          {
+            groundingMetadata: {
+              groundingChunks: [
+                { web: { uri: 'https://example.com/news-1', title: 'خبر تقني أول' } },
+                { web: { uri: 'https://example.com/news-1', title: 'مكرر' } },
+                { web: { uri: 'javascript:alert(1)', title: 'Unsafe' } },
+                { web: { uri: 'https://tech.example.org/post', title: 'Tech Report' } }
+              ]
+            }
+          }
+        ]
+      };
+    }
+  });
+
+  assert.equal(res.status, 200);
+  assert.deepEqual(capturedConfig.tools, [{ googleSearch: {} }]);
+  const body = await res.json();
+  assert.equal(body.sources.length, 2);
+  assert.deepEqual(body.sources, [
+    { title: 'خبر تقني أول', uri: 'https://example.com/news-1' },
+    { title: 'Tech Report', uri: 'https://tech.example.org/post' }
+  ]);
+});
+
+test('routes selectedModel: plus-fast directly to gemini-2.5-flash-lite and preserves googleSearch when deepThinking is active', async () => {
+  const { resetKeyRotationForTests } = await import('../lib/geminiKeys.js');
+  resetKeyRotationForTests();
+
+  let captured = null;
+  const req = new Request('http://localhost:3000/api/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      messages: [{ role: 'user', content: 'ملخص سريع لأحدث الأخبار' }],
+      selectedModel: 'plus-fast',
+      deepThinking: true
+    })
+  });
+
+  const res = await onRequestPost({
+    request: req,
+    env: { GEMINI_KEY_1: 'k1' },
+    generateFn: async ({ model, config }) => {
+      captured = { model, config };
+      return { text: 'إجابة سريعة مع بحث حي.' };
+    }
+  });
+
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.model, 'gemini-3.5-flash-lite');
+  assert.equal(body.tierId, 'plus-fast');
+  assert.equal(body.modelName, 'بلس');
+  assert.equal(body.usedFallback, true);
+  assert.equal(captured.model, 'gemini-3.5-flash-lite');
+  assert.deepEqual(captured.config.tools, [{ googleSearch: {} }]);
+});
+
+test('falls back gracefully to deepThinking without googleSearch if Search Grounding hits 429 quota while text quota remains healthy', async () => {
+  const { resetKeyRotationForTests } = await import('../lib/geminiKeys.js');
+  resetKeyRotationForTests();
+
+  const calls = [];
+  const req = new Request('http://localhost:3000/api/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      messages: [{ role: 'user', content: 'حلل هذا الموضوع بعمق' }],
+      selectedModel: 'plus-max',
+      deepThinking: true
+    })
+  });
+
+  const res = await onRequestPost({
+    request: req,
+    env: { GEMINI_KEY_1: 'k1' },
+    generateFn: async ({ model, config }) => {
+      calls.push({ model, hasTools: Boolean(config?.tools?.length), thinkingLevel: config?.thinkingConfig?.thinkingLevel });
+      if (config?.tools?.length) {
+        const err = new Error('Search grounding quota exceeded (429)');
+        err.status = 429;
+        throw err;
+      }
+      return { text: 'تحليل عميق متاح دون انقطاع.' };
+    }
+  });
+
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.reply, 'تحليل عميق متاح دون انقطاع.');
+  assert.equal(body.model, 'gemini-4-hydrogen');
+  assert.equal(calls.some((c) => c.hasTools === false && c.thinkingLevel === 'XHIGH'), true);
+});
+
+test('never lets an invalid 401 key mask a real 429 error and excludes known 401 keys on subsequent calls', async () => {
+  const { resetKeyRotationForTests } = await import('../lib/geminiKeys.js');
+  resetKeyRotationForTests();
+
+  const env = {
+    GEMINI_KEY_1: 'AIzaSyValidQuotaKey1234567890123456',
+    GEMINI_KEY_2: 'AIzaSyInvalidAuthKey123456789012345'
+  };
+
+  const firstReq = new Request('http://localhost:3000/api/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ messages: [{ role: 'user', content: 'hi' }], selectedModel: 'plus-max' })
+  });
+  const firstRes = await onRequestPost({
+    request: firstReq,
+    env,
+    generateFn: async ({ apiKey }) => {
+      if (apiKey === env.GEMINI_KEY_1) {
+        const err = new Error('Quota exceeded (429)');
+        err.status = 429;
+        throw err;
+      }
+      const err = new Error('API key not valid.');
+      err.status = 401;
+      throw err;
+    }
+  });
+
+  assert.equal(firstRes.status, 429);
+  const firstBody = await firstRes.json();
+  assert.equal(firstBody.errorCode, 'GLOBAL_QUOTA_EXHAUSTED');
+
+  const secondReq = new Request('http://localhost:3000/api/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ messages: [{ role: 'user', content: 'hi again' }] })
+  });
+  const seenSecondKeys = [];
+  const secondRes = await onRequestPost({
+    request: secondReq,
+    env,
+    generateFn: async ({ apiKey }) => {
+      seenSecondKeys.push(apiKey);
+      return { text: 'تم الرد بالمفتاح الصحيح مباشرة' };
+    }
+  });
+
+  assert.equal(secondRes.status, 200);
+  assert.deepEqual(seenSecondKeys, [env.GEMINI_KEY_1]);
 });
 

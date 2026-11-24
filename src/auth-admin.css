@@ -648,9 +648,41 @@
   font-size: 11px;
 }
 
+.admin-models-capacity-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
 .admin-capacity-card {
   display: grid;
   gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: var(--surface);
+}
+
+.admin-capacity-model-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.admin-capacity-model-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1.4;
+}
+
+.admin-capacity-percent {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
 }
 
 .admin-capacity-numbers {
@@ -662,14 +694,14 @@
 }
 
 .admin-capacity-main {
-  font-size: 26px;
+  font-size: 24px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   color: var(--text);
 }
 
 .admin-capacity-main span {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 500;
   color: var(--muted);
 }
@@ -690,6 +722,36 @@
   transition: width .25s ease;
 }
 
+.admin-progress-fill-plus-plus {
+  background: linear-gradient(90deg, #5b4cc9, #8b7cf6);
+}
+
+.admin-progress-fill-plus {
+  background: linear-gradient(90deg, #10b981, #34d399);
+}
+
+.admin-refresh-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.admin-refresh-notice {
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid #a8dfc4;
+  color: #166534;
+  background: #f0fdf4;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.chat-dark .admin-refresh-notice {
+  border-color: #25593d;
+  color: #9ae6b4;
+  background: #132a1d;
+}
+
 .admin-stats-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -703,6 +765,35 @@
   background: var(--surface);
   display: grid;
   gap: 4px;
+  text-align: start;
+}
+
+.admin-stat-card-btn {
+  width: 100%;
+  font: inherit;
+  cursor: pointer;
+  transition: transform .15s ease, border-color .15s ease, background .15s ease, box-shadow .15s ease;
+}
+
+.admin-stat-card-btn:hover {
+  transform: translateY(-1px);
+  border-color: #7567ed66;
+  background: var(--surface-hover);
+  box-shadow: 0 6px 16px #0000000d;
+}
+
+.admin-stat-card-btn:focus-visible {
+  outline: 2px solid #7567ed;
+  outline-offset: 2px;
+}
+
+.admin-stat-card-btn.is-open {
+  border-color: #6959df88;
+  background: #6959df0d;
+}
+
+.chat-dark .admin-stat-card-btn.is-open {
+  background: #6959df1f;
 }
 
 .admin-stat-label {
@@ -718,11 +809,83 @@
   font-variant-numeric: tabular-nums;
 }
 
+.admin-stat-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #5b4cc9;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.chat-dark .admin-stat-hint {
+  color: #c8bfff;
+}
+
+.admin-stat-chevron {
+  display: inline-block;
+  font-size: 11px;
+  transition: transform .18s ease;
+}
+
+.admin-stat-card-btn.is-open .admin-stat-chevron {
+  transform: rotate(180deg);
+}
+
+.admin-directory-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.admin-directory-tab {
+  min-height: 40px;
+  padding: 7px 12px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  color: var(--muted);
+  background: var(--surface);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background .15s ease, color .15s ease, border-color .15s ease;
+}
+
+.admin-directory-tab:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+.admin-directory-tab.active {
+  border-color: #6959df;
+  color: #fff;
+  background: #6959df;
+}
+
+.admin-directory-tab:focus-visible {
+  outline: 2px solid #7567ed;
+  outline-offset: 2px;
+}
+
 .admin-visits-list {
   display: grid;
   gap: 8px;
-  max-height: 220px;
+  max-height: 240px;
+  padding-top: 4px;
   overflow-y: auto;
+  animation: admin-dropdown-fade .16s ease;
+}
+
+@keyframes admin-dropdown-fade {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .admin-visit-row {
@@ -943,6 +1106,7 @@
     padding-bottom: max(20px, env(safe-area-inset-bottom));
   }
 
+  .admin-models-capacity-grid,
   .admin-stats-grid {
     grid-template-columns: 1fr;
   }
@@ -969,5 +1133,15 @@
     min-height: 32px;
     padding: 0 9px;
     font-size: 11px;
+  }
+
+  .admin-directory-tabs {
+    grid-template-columns: 1fr;
+  }
+
+  .chat-app input:not([type='checkbox']),
+  .chat-app textarea,
+  .chat-app select {
+    font-size: 16px;
   }
 }

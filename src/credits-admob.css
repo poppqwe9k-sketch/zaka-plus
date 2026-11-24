@@ -10,9 +10,11 @@
 
 .credits-inline-meta {
   display: inline-flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
   min-height: 35px;
+  max-width: 100%;
   padding: 5px 12px;
   border: 1px solid var(--line);
   border-radius: 999px;
@@ -20,7 +22,6 @@
   color: var(--muted);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
-  white-space: nowrap;
 }
 
 .credits-inline-meta strong {
@@ -28,22 +29,34 @@
   font-weight: 700;
 }
 
-.credits-inline-empty {
-  border-color: #e2a2a2;
-  background: #fff3f3;
+.credits-fast-tag {
+  color: #166534;
+  font-size: 11px;
+  font-weight: 600;
 }
 
-.credits-inline-empty strong {
-  color: #b42318;
+.chat-dark .credits-fast-tag {
+  color: #86efac;
 }
 
-.chat-dark .credits-inline-empty {
-  border-color: #60383d;
-  background: #321f22;
+.credits-inline-fast-mode {
+  border-color: #a8dfc4;
+  background: #f0fdf4;
+  color: #166534;
 }
 
-.chat-dark .credits-inline-empty strong {
-  color: #ffb4ad;
+.credits-inline-fast-mode strong {
+  color: #14532d;
+}
+
+.chat-dark .credits-inline-fast-mode {
+  border-color: #25593d;
+  color: #9ae6b4;
+  background: #132a1d;
+}
+
+.chat-dark .credits-inline-fast-mode strong {
+  color: #bbf7d0;
 }
 
 .global-quota-notice,

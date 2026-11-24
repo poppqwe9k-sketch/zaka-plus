@@ -7,7 +7,9 @@ import {
   getLocalDateKey,
   isCreditRequiredAction,
   isCreditsCycleExpired,
-  normalizeCreditsState
+  normalizeCreditsState,
+  shouldDeductCreditForReply,
+  shouldUseFallbackLiteModel
 } from './credits.js';
 
 test('initializes with 3 daily free credits for new user with 24h cycle timestamps', () => {
@@ -62,11 +64,12 @@ test('resets depleted credits to 3 on a new calendar day while preserving admin-
   assert.equal(keptSurplus.remaining, 8);
 });
 
-test('requires credits only for Plus Max and image generation, keeping Plus/Plus Plus flag helper consistent', () => {
-  assert.equal(isCreditRequiredAction({ wantsImage: true, selectedModel: 'plus' }), true);
+test('requires credits only for Plus Plus (plus-max) and image generation, keeping Plus unlimited free', () => {
+  assert.equal(isCreditRequiredAction({ wantsImage: true, selectedModel: 'plus-fast' }), true);
   assert.equal(isCreditRequiredAction({ wantsImage: false, selectedModel: 'plus-max' }), true);
+  assert.equal(isCreditRequiredAction({ wantsImage: false, selectedModel: 'plus-plus' }), true);
+  assert.equal(isCreditRequiredAction({ wantsImage: false, selectedModel: 'plus-fast' }), false);
   assert.equal(isCreditRequiredAction({ wantsImage: false, selectedModel: 'plus' }), false);
-  assert.equal(isCreditRequiredAction({ wantsImage: false, selectedModel: 'plus-plus' }), false);
 });
 
 test('clamps consumed credits cleanly at zero without negative balance', () => {
@@ -76,4 +79,17 @@ test('clamps consumed credits cleanly at zero without negative balance', () => {
     state = consumeOneCredit(state, '2026-11-22', t0 + i * 1000);
   }
   assert.equal(state.remaining, 0);
+});
+
+test('routes default Plus, zero-credit Plus Plus, or primary-exhausted chat messages to unlimited lite model without deducting credits', () => {
+  assert.equal(shouldUseFallbackLiteModel({ creditsRemaining: 3, globalCapacityExhausted: false, wantsImage: false, selectedModel: 'plus-max' }), false);
+  assert.equal(shouldUseFallbackLiteModel({ creditsRemaining: 3, globalCapacityExhausted: false, wantsImage: false, selectedModel: 'plus-fast' }), true);
+  assert.equal(shouldUseFallbackLiteModel({ creditsRemaining: 3, globalCapacityExhausted: false, wantsImage: false }), true);
+  assert.equal(shouldUseFallbackLiteModel({ creditsRemaining: 0, globalCapacityExhausted: false, wantsImage: false, selectedModel: 'plus-max' }), true);
+  assert.equal(shouldUseFallbackLiteModel({ creditsRemaining: 2, globalCapacityExhausted: true, wantsImage: false, selectedModel: 'plus-max' }), true);
+  assert.equal(shouldUseFallbackLiteModel({ creditsRemaining: 0, globalCapacityExhausted: false, wantsImage: true }), false);
+  assert.equal(shouldUseFallbackLiteModel({ creditsRemaining: 3, globalCapacityExhausted: false, wantsImage: true, selectedModel: 'plus-fast' }), false);
+
+  assert.equal(shouldDeductCreditForReply({ usedFallback: false }), true);
+  assert.equal(shouldDeductCreditForReply({ usedFallback: true }), false);
 });

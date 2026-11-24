@@ -80,11 +80,59 @@ service cloud.firestore {
         && data.lastActiveAt is timestamp;
     }
 
+    function isValidUserChat(data, uid) {
+      return data.keys().hasAll([
+          'id',
+          'ownerUid',
+          'title',
+          'messages',
+          'createdAtMs',
+          'updatedAtMs',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id',
+          'ownerUid',
+          'title',
+          'messages',
+          'createdAtMs',
+          'updatedAtMs',
+          'createdAt',
+          'updatedAt'
+        ])
+        && isValidId(data.id)
+        && isValidId(data.ownerUid)
+        && data.ownerUid == uid
+        && data.ownerUid == request.auth.uid
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 120
+        && data.messages is list && data.messages.size() <= 300
+        && (data.messages.size() == 0 || (
+          data.messages[0] is map
+          && data.messages[0].id is string
+          && data.messages[0].id.size() >= 1 && data.messages[0].id.size() <= 128
+          && data.messages[0].role in ['user', 'assistant']
+        ))
+        && data.createdAtMs is int && data.createdAtMs >= 0
+        && data.updatedAtMs is int && data.updatedAtMs >= 0
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
     function isValidSiteAnalytics(data) {
       return data.keys().hasAll(['totalVisits', 'registeredUsersCount', 'updatedAt'])
         && data.keys().hasOnly(['totalVisits', 'registeredUsersCount', 'updatedAt'])
         && data.totalVisits is int && data.totalVisits >= 0 && data.totalVisits <= 1000000000
         && data.registeredUsersCount is int && data.registeredUsersCount >= 0 && data.registeredUsersCount <= 100000000
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidModelQuotaAnalytics(data) {
+      return data.keys().hasAll(['cycleStartedAt', 'plusPlusUsed', 'plusUsed', 'updatedAt'])
+        && data.keys().hasOnly(['cycleStartedAt', 'plusPlusUsed', 'plusUsed', 'updatedAt'])
+        && data.cycleStartedAt is int && data.cycleStartedAt >= 0
+        && data.plusPlusUsed is int && data.plusPlusUsed >= 0 && data.plusPlusUsed <= 1000000
+        && data.plusUsed is int && data.plusUsed >= 0 && data.plusUsed <= 1000000
         && data.updatedAt is timestamp;
     }
 
@@ -139,7 +187,7 @@ service cloud.firestore {
                 && incoming().remainingCredits <= (existing().remainingCredits > existing().dailyLimit ? existing().remainingCredits : existing().dailyLimit)
                 && incoming().lastActiveAt == request.time
               ) ||
-              // Action 4: Record session visit & displayName sync
+              // Action 3: Record session visit & displayName sync
               (incoming().diff(existing()).affectedKeys().hasOnly(['visitsCount', 'lastActiveAt', 'updatedAt', 'displayName'])
                 && incoming().visitsCount >= existing().visitsCount
                 && incoming().visitsCount <= existing().visitsCount + 1
@@ -150,32 +198,113 @@ service cloud.firestore {
         );
 
       allow delete: if false;
+
+      match /chats/{chatId} {
+        allow get: if isValidId(uid)
+          && isValidId(chatId)
+          && isOwner(uid)
+          && get(/databases/$(database)/documents/users/$(uid)).data.uid == request.auth.uid;
+
+        allow list: if isValidId(uid)
+          && isOwner(uid)
+          && existing().ownerUid == request.auth.uid;
+
+        allow create: if isValidId(uid)
+          && isValidId(chatId)
+          && isOwner(uid)
+          && isValidUserChat(incoming(), uid)
+          && incoming().id == chatId
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && get(/databases/$(database)/documents/users/$(uid)).data.uid == request.auth.uid;
+
+        allow update: if isValidId(uid)
+          && isValidId(chatId)
+          && isOwner(uid)
+          && isValidUserChat(incoming(), uid)
+          && incoming().id == existing().id
+          && incoming().ownerUid == existing().ownerUid
+          && incoming().createdAt == existing().createdAt
+          && incoming().createdAtMs == existing().createdAtMs
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'messages', 'updatedAtMs', 'updatedAt'])
+          && get(/databases/$(database)/documents/users/$(uid)).data.uid == request.auth.uid;
+
+        allow delete: if isValidId(uid)
+          && isValidId(chatId)
+          && isOwner(uid)
+          && get(/databases/$(database)/documents/users/$(uid)).data.uid == request.auth.uid;
+      }
     }
 
     match /analytics/{docId} {
-      allow get: if isValidId(docId) && docId == 'site' && isAdmin();
+      allow get: if isValidId(docId) && isSignedIn() && (
+        (docId == 'site' && isAdmin())
+        || docId == 'quota'
+      );
       allow list: if false;
 
       allow create: if isValidId(docId)
-        && docId == 'site'
         && isSignedIn()
-        && isValidSiteAnalytics(incoming())
-        && incoming().totalVisits >= 0 && incoming().totalVisits <= 1
-        && incoming().registeredUsersCount >= 0 && incoming().registeredUsersCount <= 1
-        && incoming().updatedAt == request.time;
+        && (
+          (docId == 'site'
+            && isValidSiteAnalytics(incoming())
+            && incoming().totalVisits >= 0 && incoming().totalVisits <= 1
+            && incoming().registeredUsersCount >= 0 && incoming().registeredUsersCount <= 1
+            && incoming().updatedAt == request.time
+          ) ||
+          (docId == 'quota'
+            && isValidModelQuotaAnalytics(incoming())
+            && incoming().cycleStartedAt <= request.time.toMillis() + 60000
+            && incoming().plusPlusUsed >= 0 && incoming().plusPlusUsed <= 1
+            && incoming().plusUsed >= 0 && incoming().plusUsed <= 1
+            && (incoming().plusPlusUsed + incoming().plusUsed) <= 1
+            && incoming().updatedAt == request.time
+          )
+        );
 
       allow update: if isValidId(docId)
-        && docId == 'site'
         && isSignedIn()
-        && isValidSiteAnalytics(incoming())
-        && incoming().updatedAt == request.time
-        && incoming().diff(existing()).affectedKeys().hasOnly(['totalVisits', 'registeredUsersCount', 'updatedAt'])
         && (
-          isAdmin() || (
-            incoming().totalVisits >= existing().totalVisits
-            && incoming().totalVisits <= existing().totalVisits + 1
-            && incoming().registeredUsersCount >= existing().registeredUsersCount
-            && incoming().registeredUsersCount <= existing().registeredUsersCount + 1
+          (docId == 'site'
+            && isValidSiteAnalytics(incoming())
+            && incoming().updatedAt == request.time
+            && incoming().diff(existing()).affectedKeys().hasOnly(['totalVisits', 'registeredUsersCount', 'updatedAt'])
+            && (
+              isAdmin() || (
+                incoming().totalVisits >= existing().totalVisits
+                && incoming().totalVisits <= existing().totalVisits + 1
+                && incoming().registeredUsersCount >= existing().registeredUsersCount
+                && incoming().registeredUsersCount <= existing().registeredUsersCount + 1
+              )
+            )
+          ) ||
+          (docId == 'quota'
+            && isValidModelQuotaAnalytics(incoming())
+            && incoming().updatedAt == request.time
+            && (
+              (isAdmin()
+                && incoming().diff(existing()).affectedKeys().hasOnly(['cycleStartedAt', 'plusPlusUsed', 'plusUsed', 'updatedAt'])
+              ) ||
+              (incoming().diff(existing()).affectedKeys().hasOnly(['plusPlusUsed', 'updatedAt'])
+                && request.time.toMillis() - existing().cycleStartedAt < 86400000
+                && incoming().plusPlusUsed == existing().plusPlusUsed + 1
+                && incoming().plusUsed == existing().plusUsed
+              ) ||
+              (incoming().diff(existing()).affectedKeys().hasOnly(['plusUsed', 'updatedAt'])
+                && request.time.toMillis() - existing().cycleStartedAt < 86400000
+                && incoming().plusUsed == existing().plusUsed + 1
+                && incoming().plusPlusUsed == existing().plusPlusUsed
+              ) ||
+              (incoming().diff(existing()).affectedKeys().hasOnly(['cycleStartedAt', 'plusPlusUsed', 'plusUsed', 'updatedAt'])
+                && request.time.toMillis() - existing().cycleStartedAt >= 86340000
+                && incoming().cycleStartedAt - existing().cycleStartedAt >= 86400000
+                && incoming().cycleStartedAt <= request.time.toMillis() + 60000
+                && incoming().plusPlusUsed >= 0 && incoming().plusPlusUsed <= 1
+                && incoming().plusUsed >= 0 && incoming().plusUsed <= 1
+                && (incoming().plusPlusUsed + incoming().plusUsed) <= 1
+              )
+            )
           )
         );
 
