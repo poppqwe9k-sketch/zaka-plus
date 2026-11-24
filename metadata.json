@@ -1,6 +1,6 @@
 {
-  "name": "ذكاء بلس | Zaka+",
-  "description": "مساعدك الذكي باللغة العربية والإنجليزية.",
+  "name": "Plus AI",
+  "description": "Plus AI — مساعدك الذكي باللغة العربية والإنجليزية.",
   "requestFramePermissions": [],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"

@@ -1,9 +1,9 @@
-const CACHE_NAME = 'zaka-plus-shell-v2';
+const CACHE_NAME = 'zaka-plus-shell-v3';
 const APP_SHELL = [
   '/',
   '/index.html',
   '/manifest.webmanifest',
-  '/logo.png'
+  '/logo.png?v=5'
 ];
 
 self.addEventListener('install', (event) => {

@@ -1,6 +1,6 @@
 {
   "appId": "com.zakaplus.app",
-  "appName": "Zaka+",
+  "appName": "Plus AI",
   "webDir": "dist",
   "bundledWebRuntime": false,
   "android": {

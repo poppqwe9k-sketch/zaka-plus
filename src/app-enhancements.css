@@ -54,11 +54,11 @@ body,
 .brand-mark {
   color: transparent;
   font-size: 0 !important;
-  background-color: #fff;
-  background-image: url('/logo.svg');
+  background-color: #141519;
+  background-image: url('/logo.png?v=5');
   background-position: center;
   background-repeat: no-repeat;
-  background-size: contain;
+  background-size: cover;
   border: 1px solid #ededed;
 }
 

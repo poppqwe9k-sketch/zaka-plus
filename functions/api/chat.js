@@ -363,7 +363,9 @@ export async function handleChat(request, env, generateFn = null) {
       quotaMeta
     });
   } catch (error) {
-    const status = typeof error?.status === 'number' && error.status >= 400 ? error.status : 502;
+    const rawStatus = typeof error?.status === 'number' && error.status >= 400 ? error.status : 502;
+    const isGlobalQuota = rawStatus === 429 || isQuotaExhaustedError(error);
+    const status = isGlobalQuota ? 429 : rawStatus;
     const message = formatGeminiErrorMessage(error);
     const triedKeys = typeof error?.triedKeys === 'number' ? error.triedKeys : undefined;
     const quotaMeta = error?.quotaMeta || {
@@ -374,8 +376,12 @@ export async function handleChat(request, env, generateFn = null) {
       reachedModel: false,
       succeeded: false
     };
+    const friendly429 = 'اكتملت السعة اليومية الكلية للتطبيق مؤقتاً، وسيتم تجديد السعة تلقائياً خلال 24 ساعة.';
     return json({
-      error: triedKeys && triedKeys > 1 ? `${message} (بعد تجربة ${triedKeys} مفاتيح)` : message,
+      error: isGlobalQuota
+        ? friendly429
+        : (triedKeys && triedKeys > 1 ? `${message} (بعد تجربة ${triedKeys} مفاتيح)` : message),
+      ...(isGlobalQuota ? { errorCode: 'GLOBAL_QUOTA_EXHAUSTED' } : {}),
       triedKeys,
       model: tierConfig.model,
       tierId: tierConfig.tierId,

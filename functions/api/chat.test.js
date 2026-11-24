@@ -127,6 +127,9 @@ test('rotates across GEMINI_KEY (no 1) and extra GEMINI_*KEY* secrets before ret
   });
 
   assert.equal(res.status, 429);
+  const body = await res.json();
+  assert.equal(body.errorCode, 'GLOBAL_QUOTA_EXHAUSTED');
+  assert.equal(body.error.includes('24 ساعة'), true);
   assert.equal(seenKeys.includes('key-unnumbered'), true);
   assert.equal(seenKeys.includes('key-2'), true);
   assert.equal(seenKeys.includes('key-backup'), true);
@@ -213,7 +216,7 @@ test('forwards exact user message to gemini-4-hydrogen and extracts non-thought 
   ]);
   const body = await res.json();
   assert.equal(body.reply, 'أهلاً بك! أنا بخير والحمد لله، كيف يمكنني مساعدتك اليوم؟');
-  assert.equal(body.modelName, 'ذكاء بلس');
+  assert.equal(body.modelName, 'Plus AI');
 });
 
 test('never stops early when previous keys were in 429 cooldown; tries every remaining key in env before failing', async () => {

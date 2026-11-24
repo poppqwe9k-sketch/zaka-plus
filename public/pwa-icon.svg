@@ -1,12 +1,19 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="112" fill="#17191f"/>
-  <g transform="translate(100 108) scale(2.15)" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M46 18c-8-9-24-8-30 3-8 1-14 8-13 16-6 5-7 14-2 21-4 7-2 16 5 21 6 5 15 5 21 1 5 6 14 7 21 3 7-4 10-13 7-21 6-5 7-15 2-22 4-7 2-16-5-21-3-2-6-3-8-4z"/>
-    <path d="m25 26 18 16-21 12 22 15-16 16M43 42l19-9 10 19m-28 17 22-7 9 17"/>
-    <circle cx="25" cy="26" r="3.5" fill="#fff"/><circle cx="43" cy="42" r="3.5" fill="#fff"/>
-    <circle cx="22" cy="54" r="3.5" fill="#fff"/><circle cx="44" cy="69" r="3.5" fill="#fff"/>
-    <circle cx="28" cy="85" r="3.5" fill="#fff"/><circle cx="62" cy="33" r="3.5" fill="#fff"/>
-    <circle cx="66" cy="62" r="3.5" fill="#fff"/><circle cx="72" cy="52" r="3.5" fill="#fff"/><circle cx="75" cy="79" r="3.5" fill="#fff"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title">
+  <title id="title">Plus AI</title>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#27292e"/>
+      <stop offset="100%" stop-color="#0b0c10"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" fill="url(#bg)"/>
+  <g fill="none" stroke="#ffffff" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M256 80c26.5 0 48 21.5 48 48v80h80c26.5 0 48 21.5 48 48s-21.5 48-48 48h-80v80c0 26.5-21.5 48-48 48s-48-21.5-48-48v-80h-80c-26.5 0-48-21.5-48-48s21.5-48 48-48h80v-80c0-26.5 21.5-48 48-48z" stroke-width="24"/>
+    <line x1="256" y1="80" x2="256" y2="165" stroke-width="14"/>
+    <line x1="256" y1="347" x2="256" y2="432" stroke-width="14"/>
+    <line x1="80" y1="256" x2="165" y2="256" stroke-width="14"/>
+    <line x1="347" y1="256" x2="432" y2="256" stroke-width="14"/>
+    <path d="M256 150c18 68 38 88 106 106-68 18-88 38-106 106-18-68-38-88-106-106 68-18 88-38 106-106z" stroke-width="16"/>
   </g>
-  <path d="M374 72v116M316 130h116" stroke="#fff" stroke-width="24" stroke-linecap="round"/>
+  <path d="M256 206c7 30 20 43 50 50-30 7-43 20-50 50-7-30-20-43-50-50 30-7 43-20 50-50z" fill="#ffffff"/>
 </svg>

@@ -79,5 +79,5 @@ if (isProduction) {
 }
 
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Zaka+ server listening on http://0.0.0.0:${PORT}`);
+  console.log(`Plus AI server listening on http://0.0.0.0:${PORT}`);
 });

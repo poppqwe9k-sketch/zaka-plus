@@ -6,8 +6,8 @@ export const FIXED_MODEL_CONFIG = {
   id: 'plus-max',
   model: GEMINI_HYDROGEN_MODEL_ID,
   fallbackModels: [],
-  labelAr: 'ذكاء بلس',
-  labelEn: 'Zaka+',
+  labelAr: 'Plus AI',
+  labelEn: 'Plus AI',
   thinkingLevel: 'LOW',
   deepThinkingLevel: 'XHIGH'
 };

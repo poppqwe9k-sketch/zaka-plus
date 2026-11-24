@@ -1,0 +1,171 @@
+import { CREDITS_CYCLE_MS, DAILY_FREE_CREDITS, getLocalDateKey } from './credits.js';
+
+export const ADMIN_EMAIL = 'poppqwe9k@gmail.com';
+export const GLOBAL_ADMIN_CAPACITY_TARGET = 200;
+
+export const USER_PLANS = [
+  { id: 'free', defaultDailyLimit: DAILY_FREE_CREDITS },
+  { id: 'pro', defaultDailyLimit: 25 },
+  { id: 'vip', defaultDailyLimit: 100 }
+];
+
+export function isAdminUser(user) {
+  if (!user || typeof user.email !== 'string') return false;
+  return user.email.trim().toLowerCase() === ADMIN_EMAIL && user.emailVerified === true;
+}
+
+export function isAdminEmailUnverified(user) {
+  if (!user || typeof user.email !== 'string') return false;
+  return user.email.trim().toLowerCase() === ADMIN_EMAIL && user.emailVerified !== true;
+}
+
+export function sanitizeDisplayName(rawName, email = '') {
+  const fromName = typeof rawName === 'string' ? rawName.trim() : '';
+  if (fromName) return fromName.slice(0, 100);
+  const emailPrefix = typeof email === 'string' && email.includes('@')
+    ? email.split('@')[0].trim()
+    : '';
+  return (emailPrefix || 'مستخدم Plus AI').slice(0, 100);
+}
+
+export function sanitizeEmail(rawEmail) {
+  if (typeof rawEmail !== 'string') return '';
+  return rawEmail.trim().slice(0, 254);
+}
+
+export function normalizePlan(plan) {
+  return plan === 'pro' || plan === 'vip' ? plan : 'free';
+}
+
+export function clampDailyLimit(limit, fallback = DAILY_FREE_CREDITS) {
+  const num = Number(limit);
+  if (!Number.isFinite(num) || num < 1) return fallback;
+  return Math.min(10000, Math.floor(num));
+}
+
+export function clampCredits(value, fallback = DAILY_FREE_CREDITS) {
+  const num = Number(value);
+  if (!Number.isFinite(num) || num < 0) return fallback;
+  return Math.min(100000, Math.floor(num));
+}
+
+export function buildInitialUserProfile({
+  uid,
+  email,
+  displayName,
+  now = Date.now(),
+  todayKey = getLocalDateKey(new Date(now))
+}) {
+  const safeEmail = sanitizeEmail(email);
+  return {
+    uid: String(uid || '').slice(0, 128),
+    email: safeEmail || 'user@plus-ai.local',
+    displayName: sanitizeDisplayName(displayName, safeEmail),
+    plan: 'free',
+    dailyLimit: DAILY_FREE_CREDITS,
+    remainingCredits: DAILY_FREE_CREDITS,
+    cycleStartedAt: Math.max(0, Math.floor(now)),
+    lastResetDate: String(todayKey || getLocalDateKey()).slice(0, 20),
+    totalUsed: 0,
+    visitsCount: 1
+  };
+}
+
+export function computeAdminCapacitySummary(dailyQuota) {
+  const targetCapacity = GLOBAL_ADMIN_CAPACITY_TARGET;
+  if (!dailyQuota || typeof dailyQuota !== 'object') {
+    return {
+      targetCapacity,
+      remaining: targetCapacity,
+      used: 0,
+      percentRemaining: 100,
+      validKeyCount: 0,
+      actualCapacity: targetCapacity
+    };
+  }
+
+  const validKeyCount = Math.max(0, Math.floor(Number(dailyQuota.validKeyCount) || 0));
+  const actualCapacity = Math.max(0, Math.floor(Number(dailyQuota.totalCapacity) || 0));
+  const used = Math.max(0, Math.floor(Number(dailyQuota.usedCount) || 0));
+
+  let remaining = 0;
+  if (validKeyCount > 0) {
+    const rawRemaining = Math.max(0, Math.floor(Number(dailyQuota.remaining) || 0));
+    remaining = Math.min(targetCapacity, rawRemaining);
+  }
+
+  const percentRemaining = targetCapacity > 0
+    ? Math.max(0, Math.min(100, Math.round((remaining / targetCapacity) * 100)))
+    : 0;
+
+  return {
+    targetCapacity,
+    remaining,
+    used: Math.max(0, targetCapacity - remaining),
+    percentRemaining,
+    validKeyCount,
+    actualCapacity
+  };
+}
+
+export function isUserProfileCycleExpired(profile, now = Date.now()) {
+  const startedAt = Number(profile?.cycleStartedAt);
+  if (!Number.isFinite(startedAt) || startedAt <= 0) return true;
+  if (now < startedAt) return true;
+  return now - startedAt >= CREDITS_CYCLE_MS;
+}
+
+export function filterAndSortUsers(users = [], query = '') {
+  const list = Array.isArray(users) ? [...users] : [];
+  const trimmed = typeof query === 'string' ? query.trim().toLowerCase() : '';
+  const filtered = trimmed
+    ? list.filter((u) => {
+        const name = String(u?.displayName || '').toLowerCase();
+        const email = String(u?.email || '').toLowerCase();
+        const plan = String(u?.plan || '').toLowerCase();
+        return name.includes(trimmed) || email.includes(trimmed) || plan.includes(trimmed);
+      })
+    : list;
+
+  return filtered.sort((a, b) => {
+    const aTime = typeof a?.lastActiveAt?.toMillis === 'function'
+      ? a.lastActiveAt.toMillis()
+      : (Number(a?.cycleStartedAt) || 0);
+    const bTime = typeof b?.lastActiveAt?.toMillis === 'function'
+      ? b.lastActiveAt.toMillis()
+      : (Number(b?.cycleStartedAt) || 0);
+    return bTime - aTime;
+  });
+}
+
+export function mapFirebaseAuthError(error, t = {}) {
+  const code = error?.code || '';
+  const message = error instanceof Error ? error.message : String(error || '');
+
+  if (code === 'auth/invalid-email') return t.authErrInvalidEmail || 'صيغة البريد الإلكتروني غير صحيحة.';
+  if (code === 'auth/user-not-found' || code === 'auth/wrong-password' || code === 'auth/invalid-credential') {
+    return t.authErrInvalidCredentials || 'البريد الإلكتروني أو كلمة المرور غير صحيحة.';
+  }
+  if (code === 'auth/email-already-in-use') {
+    return t.authErrEmailInUse || 'هذا البريد الإلكتروني مسجل مسبقاً. جرّب تسجيل الدخول.';
+  }
+  if (code === 'auth/weak-password') {
+    return t.authErrWeakPassword || 'كلمة المرور ضعيفة (يجب أن تكون 6 أحرف على الأقل).';
+  }
+  if (code === 'auth/operation-not-allowed') {
+    return t.authErrOperationNotAllowed || 'تسجيل الدخول بالبريد وكلمة المرور غير مفعّل بعد في إعدادات Firebase Authentication. فعّله من لوحة Firebase أو استخدم الدخول السريع عبر Google.';
+  }
+  if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+    return t.authErrPopupClosed || 'تم إغلاق نافذة تسجيل الدخول قبل إتمام العملية.';
+  }
+  if (code === 'auth/popup-blocked') {
+    return t.authErrPopupBlocked || 'حظر المتصفح النافذة المنبثقة. اسمح بالنوافذ المنبثقة ثم أعد المحاولة.';
+  }
+  if (code === 'auth/too-many-requests') {
+    return t.authErrTooManyRequests || 'محاولات متكررة كثيرة. انتظر قليلاً ثم أعد المحاولة.';
+  }
+  if (code === 'auth/network-request-failed') {
+    return t.authErrNetwork || 'تعذر الاتصال بالشبكة أثناء المصادقة.';
+  }
+  return message || t.genericError || 'تعذر إتمام عملية تسجيل الدخول.';
+}

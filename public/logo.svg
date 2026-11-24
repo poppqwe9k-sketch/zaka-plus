@@ -1,14 +1,22 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" role="img" aria-labelledby="title">
-  <title id="title">شعار ذكاء بلس</title>
-  <rect width="120" height="120" fill="#fff"/>
-  <g transform="translate(18 22) scale(.7)" fill="none" stroke="#000" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M46 18c-8-9-24-8-30 3-8 1-14 8-13 16-6 5-7 14-2 21-4 7-2 16 5 21 6 5 15 5 21 1 5 6 14 7 21 3 7-4 10-13 7-21 6-5 7-15 2-22 4-7 2-16-5-21-3-2-6-3-8-4z"/>
-    <path d="m25 26 18 16-21 12 22 15-16 16M43 42l19-9 10 19m-28 17 22-7 9 17"/>
-    <circle cx="25" cy="26" r="3.5" fill="#000"/><circle cx="43" cy="42" r="3.5" fill="#000"/>
-    <circle cx="22" cy="54" r="3.5" fill="#000"/><circle cx="44" cy="69" r="3.5" fill="#000"/>
-    <circle cx="28" cy="85" r="3.5" fill="#000"/><circle cx="62" cy="33" r="3.5" fill="#000"/>
-    <circle cx="66" cy="62" r="3.5" fill="#000"/><circle cx="72" cy="52" r="3.5" fill="#000"/>
-    <circle cx="75" cy="79" r="3.5" fill="#000"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title">
+  <title id="title">شعار Plus AI</title>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#27292e"/>
+      <stop offset="100%" stop-color="#0b0c10"/>
+    </linearGradient>
+    <clipPath id="crossOuter">
+      <path d="M256 72c31 0 56 25 56 56v72h72c31 0 56 25 56 56s-25 56-56 56h-72v72c0 31-25 56-56 56s-56-25-56-56v-72h-72c-31 0-56-25-56-56s25-56 56-56h72v-72c0-31 25-56 56-56z"/>
+    </clipPath>
+  </defs>
+  <rect width="512" height="512" fill="url(#bg)"/>
+  <g fill="none" stroke="#ffffff" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M256 80c26.5 0 48 21.5 48 48v80h80c26.5 0 48 21.5 48 48s-21.5 48-48 48h-80v80c0 26.5-21.5 48-48 48s-48-21.5-48-48v-80h-80c-26.5 0-48-21.5-48-48s21.5-48 48-48h80v-80c0-26.5 21.5-48 48-48z" stroke-width="24"/>
+    <line x1="256" y1="80" x2="256" y2="165" stroke-width="14"/>
+    <line x1="256" y1="347" x2="256" y2="432" stroke-width="14"/>
+    <line x1="80" y1="256" x2="165" y2="256" stroke-width="14"/>
+    <line x1="347" y1="256" x2="432" y2="256" stroke-width="14"/>
+    <path d="M256 150c18 68 38 88 106 106-68 18-88 38-106 106-18-68-38-88-106-106 68-18 88-38 106-106z" stroke-width="16"/>
   </g>
-  <path d="M88 8v29M73.5 22.5h29" stroke="#000" stroke-width="9" stroke-linecap="square"/>
+  <path d="M256 206c7 30 20 43 50 50-30 7-43 20-50 50-7-30-20-43-50-50 30-7 43-20 50-50z" fill="#ffffff"/>
 </svg>

@@ -4,8 +4,14 @@ import './chat-features.css';
 import './settings.css';
 import './image-generation.css';
 import './speech-dictation.css';
+import './credits-admob.css';
+import './auth-admin.css';
+import { onAuthStateChanged, signOut } from 'firebase/auth';
+import { auth } from './firebase.js';
 import { enableChatAutoScroll, scrollToBottom } from './chat-scroll.js';
 import { GEMINI_HYDROGEN_MODEL_ID } from './shared/modelTiers.js';
+import AuthModal from './components/AuthModal.jsx';
+import AdminPanelModal from './components/AdminPanelModal.jsx';
 import {
   LANGUAGES,
   getLanguageMeta,
@@ -34,14 +40,47 @@ import {
 } from './utils/speechDictation.js';
 import {
   applyMessageSendQuota,
-  formatDailyQuotaText,
   loadDailyQuotaState,
   reconcileQuotaState,
   saveDailyQuotaState
 } from './utils/dailyQuota.js';
+import {
+  DAILY_FREE_CREDITS,
+  consumeOneCredit,
+  getLocalDateKey,
+  getUserCreditsStorageKey,
+  isCreditsCycleExpired,
+  loadCreditsState,
+  normalizeCreditsState,
+  saveCreditsState
+} from './utils/credits.js';
+import {
+  clampCredits,
+  clampDailyLimit,
+  isAdminEmailUnverified,
+  isAdminUser,
+  normalizePlan,
+  sanitizeDisplayName
+} from './utils/authAdmin.js';
+import {
+  adminUpdateUserSubscription,
+  consumeUserCreditInFirestore,
+  renewExpiredCycleInFirestore,
+  subscribeAdminDashboardData,
+  subscribeUserProfile,
+  syncUserProfileOnSignIn
+} from './services/userAccountService.js';
+import { buildSharePayload, shareOrCopyApp } from './utils/shareApp.js';
 
 const MAX_ATTACHMENT_BYTES = 7 * 1024 * 1024;
 const MAX_ATTACHMENTS = 4;
+
+function isQuotaExhaustedResponse(status, data, messageText = '') {
+  if (status === 429) return true;
+  if (data?.errorCode === 'GLOBAL_QUOTA_EXHAUSTED') return true;
+  const combined = `${data?.error || ''} ${data?.message || ''} ${messageText || ''}`;
+  return /429|resource_exhausted|resource has been exhausted|quota exceeded|too many requests|limit:\s*20|global_quota_exhausted/i.test(combined);
+}
 
 function createId(prefix = 'id') {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -148,6 +187,17 @@ function StopMicIcon() {
   );
 }
 
+function ShareIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="18" cy="5" r="3" />
+      <circle cx="6" cy="12" r="3" />
+      <circle cx="18" cy="19" r="3" />
+      <path d="M8.59 13.51l6.83 3.98M15.41 6.51l-6.82 3.98" />
+    </svg>
+  );
+}
+
 export default function App() {
   const initialLocal = useMemo(() => readLocalStorageState(), []);
   const [chats, setChats] = useState(initialLocal.chats);
@@ -167,10 +217,24 @@ export default function App() {
   const [imageMode, setImageMode] = useState(false);
   const [historyQuery, setHistoryQuery] = useState('');
   const [isListening, setIsListening] = useState(false);
+  const [credits, setCredits] = useState(() => loadCreditsState());
+  const [creditsExhaustedHighlight, setCreditsExhaustedHighlight] = useState(false);
+  const [globalCapacityExhausted, setGlobalCapacityExhausted] = useState(false);
   const [dailyQuota, setDailyQuota] = useState(() => {
     const saved = loadDailyQuotaState();
     return saved ? reconcileQuotaState(saved, {}) : null;
   });
+  const [currentUser, setCurrentUser] = useState(null);
+  const [authReady, setAuthReady] = useState(false);
+  const [userProfile, setUserProfile] = useState(null);
+  const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [authModalMode, setAuthModalMode] = useState('login');
+  const [authPromptMessage, setAuthPromptMessage] = useState('');
+  const [adminModalOpen, setAdminModalOpen] = useState(false);
+  const [adminUsersList, setAdminUsersList] = useState([]);
+  const [adminAnalytics, setAdminAnalytics] = useState({ totalVisits: 0, registeredUsersCount: 0 });
+  const [shareStatus, setShareStatus] = useState(null);
+  const shareTimerRef = useRef(null);
 
   const imageInputRef = useRef(null);
   const pdfInputRef = useRef(null);
@@ -242,6 +306,99 @@ export default function App() {
     saveOfflineState({ chats, activeChatId, settings });
   }, [chats, activeChatId, settings, storageReady]);
 
+  useEffect(() => {
+    const storageKey = getUserCreditsStorageKey(currentUser?.uid || '');
+    saveCreditsState(credits, storageKey);
+  }, [credits, currentUser?.uid]);
+
+  const userIsAdmin = useMemo(() => isAdminUser(currentUser), [currentUser]);
+  const userIsUnverifiedAdmin = useMemo(() => isAdminEmailUnverified(currentUser), [currentUser]);
+
+  useEffect(() => {
+    let unsubProfile = null;
+    let cancelled = false;
+
+    const unsubAuth = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (unsubProfile) {
+        unsubProfile();
+        unsubProfile = null;
+      }
+
+      if (cancelled) return;
+      setCurrentUser(firebaseUser || null);
+      setAuthReady(true);
+
+      if (!firebaseUser) {
+        setUserProfile(null);
+        setAdminModalOpen(false);
+        setAdminUsersList([]);
+        setCredits(loadCreditsState());
+        return;
+      }
+
+      const cachedKey = getUserCreditsStorageKey(firebaseUser.uid);
+      setCredits(loadCreditsState(getLocalDateKey(), Date.now(), DAILY_FREE_CREDITS, cachedKey));
+
+      try {
+        await syncUserProfileOnSignIn(firebaseUser);
+      } catch (err) {
+        console.error('Failed syncing user profile:', err);
+      }
+
+      if (cancelled) return;
+      unsubProfile = subscribeUserProfile(
+        firebaseUser.uid,
+        (profileData) => {
+          if (cancelled) return;
+          setUserProfile(profileData);
+          const nowMs = Date.now();
+          const todayKey = getLocalDateKey(new Date(nowMs));
+          const userDailyLimit = clampDailyLimit(profileData.dailyLimit);
+          const synced = normalizeCreditsState(
+            {
+              remaining: clampCredits(profileData.remainingCredits, userDailyLimit),
+              cycleStartedAt: Number(profileData.cycleStartedAt) || nowMs,
+              lastResetDate: profileData.lastResetDate || todayKey,
+              totalUsed: Number(profileData.totalUsed) || 0
+            },
+            todayKey,
+            nowMs,
+            userDailyLimit
+          );
+          setCredits(synced);
+          saveCreditsState(synced, cachedKey);
+        },
+        (subErr) => {
+          console.error('User profile subscription error:', subErr);
+        }
+      );
+    });
+
+    return () => {
+      cancelled = true;
+      unsubAuth();
+      if (unsubProfile) unsubProfile();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!authReady || !userIsAdmin) {
+      setAdminUsersList([]);
+      setAdminAnalytics({ totalVisits: 0, registeredUsersCount: 0 });
+      return undefined;
+    }
+
+    const unsubAdmin = subscribeAdminDashboardData({
+      onUsers: (rows) => setAdminUsersList(rows),
+      onAnalytics: (stats) => setAdminAnalytics(stats),
+      onError: (err) => {
+        console.error('Admin dashboard subscription error:', err);
+      }
+    });
+
+    return () => unsubAdmin();
+  }, [authReady, userIsAdmin]);
+
   const syncServerQuota = useCallback(async () => {
     try {
       const response = await fetch('/api/quota', { cache: 'no-store' });
@@ -251,6 +408,7 @@ export default function App() {
       setDailyQuota((prev) => {
         const next = reconcileQuotaState(prev || loadDailyQuotaState(), serverMeta, Date.now());
         saveDailyQuotaState(next);
+        setGlobalCapacityExhausted(next.validKeyCount > 0 && next.remaining === 0);
         return next;
       });
     } catch {
@@ -259,6 +417,7 @@ export default function App() {
         if (!base) return prev;
         const next = reconcileQuotaState(base, {}, Date.now());
         saveDailyQuotaState(next);
+        setGlobalCapacityExhausted(next.validKeyCount > 0 && next.remaining === 0);
         return next;
       });
     }
@@ -272,15 +431,36 @@ export default function App() {
         const next = reconcileQuotaState(prev, {}, Date.now());
         if (next.cycleStartedAt !== prev.cycleStartedAt || next.remaining !== prev.remaining) {
           saveDailyQuotaState(next);
+          setGlobalCapacityExhausted(next.validKeyCount > 0 && next.remaining === 0);
           return next;
         }
         return prev;
+      });
+      setCredits((prev) => {
+        const now = Date.now();
+        const today = getLocalDateKey(new Date(now));
+        const limit = clampDailyLimit(userProfile?.dailyLimit || prev.dailyLimit);
+        if (!isCreditsCycleExpired(prev, today, now)) return prev;
+        if (currentUser?.uid && userProfile) {
+          renewExpiredCycleInFirestore(currentUser.uid, userProfile).catch(() => {});
+        }
+        return normalizeCreditsState(prev, today, now, limit);
       });
     }, 30000);
 
     const handleVisibilityOrFocus = () => {
       if (typeof document === 'undefined' || document.visibilityState !== 'hidden') {
         syncServerQuota();
+        setCredits((prev) => {
+          const now = Date.now();
+          const today = getLocalDateKey(new Date(now));
+          const limit = clampDailyLimit(userProfile?.dailyLimit || prev.dailyLimit);
+          if (!isCreditsCycleExpired(prev, today, now)) return prev;
+          if (currentUser?.uid && userProfile) {
+            renewExpiredCycleInFirestore(currentUser.uid, userProfile).catch(() => {});
+          }
+          return normalizeCreditsState(prev, today, now, limit);
+        });
       }
     };
 
@@ -291,7 +471,7 @@ export default function App() {
       window.removeEventListener('focus', handleVisibilityOrFocus);
       document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
     };
-  }, [syncServerQuota]);
+  }, [syncServerQuota, currentUser?.uid, userProfile]);
 
   useEffect(() => enableChatAutoScroll(), []);
 
@@ -447,7 +627,61 @@ export default function App() {
   function handleNewChat() {
     setActiveChatId(null);
     setError('');
+    setCreditsExhaustedHighlight(false);
     setSidebarOpen(false);
+  }
+
+  function openAuthDialog(mode = 'login', prompt = '') {
+    setAuthModalMode(mode);
+    setAuthPromptMessage(prompt);
+    setAuthModalOpen(true);
+    setSidebarOpen(false);
+  }
+
+  async function handleSignOut() {
+    try {
+      await signOut(auth);
+      setAdminModalOpen(false);
+      setSidebarOpen(false);
+      setError('');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t.genericError);
+    }
+  }
+
+  useEffect(() => {
+    return () => {
+      if (shareTimerRef.current) {
+        window.clearTimeout(shareTimerRef.current);
+      }
+    };
+  }, []);
+
+  async function handleShareApp() {
+    if (shareTimerRef.current) {
+      window.clearTimeout(shareTimerRef.current);
+      shareTimerRef.current = null;
+    }
+    const payload = buildSharePayload(t, typeof window !== 'undefined' ? window.location : null);
+    const result = await shareOrCopyApp({ payload });
+    if (result.aborted) {
+      return;
+    }
+    if (result.ok) {
+      setShareStatus({
+        isError: false,
+        message: result.method === 'web-share' ? t.shareAppSharedStatus : t.shareAppCopiedStatus
+      });
+    } else {
+      setShareStatus({
+        isError: true,
+        message: t.shareAppErrorStatus
+      });
+    }
+    shareTimerRef.current = window.setTimeout(() => {
+      setShareStatus(null);
+      shareTimerRef.current = null;
+    }, 4500);
   }
 
   function handleSelectChat(chatId) {
@@ -553,6 +787,28 @@ export default function App() {
       return;
     }
 
+    if (!currentUser) {
+      openAuthDialog('login', t.authRequiredToSend);
+      return;
+    }
+
+    const nowMs = Date.now();
+    const todayKey = getLocalDateKey(new Date(nowMs));
+    const userLimit = clampDailyLimit(userProfile?.dailyLimit || credits.dailyLimit);
+    const currentCredits = normalizeCreditsState(credits, todayKey, nowMs, userLimit);
+    if (
+      currentCredits.remaining !== credits.remaining
+      || currentCredits.lastResetDate !== credits.lastResetDate
+      || currentCredits.cycleStartedAt !== credits.cycleStartedAt
+    ) {
+      setCredits(currentCredits);
+    }
+    if (currentCredits.remaining <= 0) {
+      setCreditsExhaustedHighlight(true);
+      setError('');
+      return;
+    }
+
     const wantsImage = imageMode || (trimmed && isImageGenerationRequest(trimmed));
 
     const userText = trimmed || '📎';
@@ -600,6 +856,7 @@ export default function App() {
     setInput('');
     setAttachments([]);
     setError('');
+    setCreditsExhaustedHighlight(false);
 
     if (wantsImage && trimmed) {
       const imageMessageId = createId('msg');
@@ -638,13 +895,31 @@ export default function App() {
           imageError: false,
           imageErrorMessage: ''
         }));
+        setCredits((prev) => {
+          const limit = clampDailyLimit(userProfile?.dailyLimit || prev.dailyLimit);
+          const next = consumeOneCredit(prev, getLocalDateKey(), Date.now(), limit);
+          saveCreditsState(next, getUserCreditsStorageKey(currentUser?.uid || ''));
+          return next;
+        });
+        if (currentUser?.uid && userProfile) {
+          consumeUserCreditInFirestore(currentUser.uid, userProfile).catch((consumeErr) => {
+            console.error('Failed syncing consumed image credit:', consumeErr);
+          });
+        }
         scrollToBottom();
       } catch (err) {
+        const rawErrMsg = err instanceof Error && err.message ? err.message : '';
+        const friendlyErr = isQuotaExhaustedResponse(0, null, rawErrMsg)
+          ? t.globalQuotaExhaustedMessage
+          : (rawErrMsg || t.imageLoadError);
+        if (isQuotaExhaustedResponse(0, null, rawErrMsg)) {
+          setGlobalCapacityExhausted(true);
+        }
         updateMessageInChat(targetChatId, imageMessageId, (m) => ({
           ...m,
           imageLoading: false,
           imageError: true,
-          imageErrorMessage: err instanceof Error && err.message ? err.message : t.imageLoadError
+          imageErrorMessage: friendlyErr
         }));
       }
       return;
@@ -694,20 +969,21 @@ export default function App() {
           });
         }
         const serverErr = data?.error || data?.message || readableRaw;
-        throw new Error(
-          serverErr
-            ? `${serverErr}${response.status ? ` [HTTP ${response.status}]` : ''}`
-            : `HTTP ${response.status} ${response.statusText || ''}`.trim()
-        );
+        if (isQuotaExhaustedResponse(response.status, data, serverErr)) {
+          setGlobalCapacityExhausted(true);
+          throw new Error(t.globalQuotaExhaustedMessage);
+        }
+        throw new Error(serverErr || t.genericError);
       }
 
       const replyText = typeof data?.reply === 'string'
         ? data.reply.trim()
         : (typeof data?.text === 'string' ? data.text.trim() : '');
       if (!replyText) {
-        const detail = data?.error || data?.message || readableRaw || `HTTP ${response.status}: Empty response`;
-        throw new Error(detail);
+        throw new Error(data?.error || data?.message || t.genericError);
       }
+
+      setGlobalCapacityExhausted(false);
 
       const successQuotaMeta = data?.quotaMeta && typeof data.quotaMeta === 'object'
         ? { ...data.quotaMeta, reachedModel: true, succeeded: true }
@@ -718,6 +994,18 @@ export default function App() {
         saveDailyQuotaState(next);
         return next;
       });
+
+      setCredits((prev) => {
+        const limit = clampDailyLimit(userProfile?.dailyLimit || prev.dailyLimit);
+        const next = consumeOneCredit(prev, getLocalDateKey(), Date.now(), limit);
+        saveCreditsState(next, getUserCreditsStorageKey(currentUser?.uid || ''));
+        return next;
+      });
+      if (currentUser?.uid && userProfile) {
+        consumeUserCreditInFirestore(currentUser.uid, userProfile).catch((consumeErr) => {
+          console.error('Failed syncing consumed message credit:', consumeErr);
+        });
+      }
 
       const assistantMessage = {
         id: createId('msg'),
@@ -734,7 +1022,13 @@ export default function App() {
         )
       );
     } catch (err) {
-      setError(err instanceof Error && err.message ? err.message : String(err || 'Request failed'));
+      const msg = err instanceof Error && err.message ? err.message : t.genericError;
+      if (isQuotaExhaustedResponse(0, null, msg)) {
+        setGlobalCapacityExhausted(true);
+        setError(t.globalQuotaExhaustedMessage);
+      } else {
+        setError(msg);
+      }
     } finally {
       setIsSending(false);
     }
@@ -800,7 +1094,7 @@ export default function App() {
       <aside className={`chat-sidebar ${sidebarOpen ? 'sidebar-visible' : ''}`}>
         <div className="sidebar-heading">
           <div className="sidebar-brand">
-            <img src="/logo.svg" alt="Zaka+" width="28" height="28" />
+            <img src="/logo.png?v=6" alt="Plus AI" width="28" height="28" />
             <span>{t.shortBrand}</span>
           </div>
           <button
@@ -876,6 +1170,93 @@ export default function App() {
           )}
         </div>
 
+        <div className="sidebar-account-box" data-testid="sidebar-account-box">
+          {currentUser ? (
+            <>
+              <div className="sidebar-account-row">
+                <div className="sidebar-avatar-badge" aria-hidden="true">
+                  {sanitizeDisplayName(userProfile?.displayName || currentUser.displayName, currentUser.email).charAt(0)}
+                </div>
+                <div className="sidebar-account-meta">
+                  <div className="sidebar-account-name-row">
+                    <span className="sidebar-account-name">
+                      {sanitizeDisplayName(userProfile?.displayName || currentUser.displayName, currentUser.email)}
+                    </span>
+                    <span className={`sidebar-plan-tag plan-${normalizePlan(userProfile?.plan)}`}>
+                      {normalizePlan(userProfile?.plan) === 'vip'
+                        ? 'VIP'
+                        : (normalizePlan(userProfile?.plan) === 'pro' ? t.planPro : t.planFree)}
+                    </span>
+                  </div>
+                  <span className="sidebar-account-email">{currentUser.email}</span>
+                </div>
+              </div>
+
+              {userIsUnverifiedAdmin && (
+                <div className="auth-error" role="status">
+                  {t.adminVerifyEmailNotice}
+                </div>
+              )}
+
+              <div className="sidebar-account-actions">
+                {userIsAdmin && (
+                  <button
+                    type="button"
+                    className="sidebar-admin-button"
+                    data-testid="admin-panel-button"
+                    onClick={() => {
+                      setAdminModalOpen(true);
+                      setSidebarOpen(false);
+                    }}
+                  >
+                    <span>🛡️</span>
+                    <span>{t.adminPanelButton}</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="sidebar-logout-button"
+                  data-testid="logout-button"
+                  onClick={handleSignOut}
+                >
+                  {t.authLogoutButton}
+                </button>
+              </div>
+            </>
+          ) : (
+            <button
+              type="button"
+              className="sidebar-auth-button"
+              data-testid="sidebar-auth-button"
+              onClick={() => openAuthDialog('login')}
+            >
+              {t.authLoginOrSignup}
+            </button>
+          )}
+        </div>
+
+        <div className="sidebar-share-wrap">
+          <button
+            type="button"
+            className="sidebar-share-button"
+            data-testid="share-app-button"
+            onClick={handleShareApp}
+          >
+            <ShareIcon />
+            <span>{t.shareAppButton}</span>
+          </button>
+          {shareStatus && (
+            <div
+              className={`sidebar-share-status ${shareStatus.isError ? 'share-status-error' : ''}`}
+              data-testid="share-app-status"
+              role="status"
+              aria-live="polite"
+            >
+              {shareStatus.message}
+            </div>
+          )}
+        </div>
+
         <div className="sidebar-footer">
           <button
             type="button"
@@ -906,18 +1287,30 @@ export default function App() {
         </button>
 
         <div className="header-brand">
-          <img src="/logo.svg" alt="Zaka+" width="34" height="34" />
+          <img src="/logo.png?v=6" alt="Plus AI" width="34" height="34" />
           <span>{t.brand}</span>
         </div>
 
-        <button
-          type="button"
-          className="ui-icon-button theme-button"
-          onClick={() => updateSetting('darkMode', !settings.darkMode)}
-          aria-label={t.darkModeLabel}
-        >
-          {settings.darkMode ? <SunIcon /> : <MoonIcon />}
-        </button>
+        <div className="header-actions">
+          {!currentUser && (
+            <button
+              type="button"
+              className="header-auth-button"
+              data-testid="header-auth-button"
+              onClick={() => openAuthDialog('login')}
+            >
+              {t.authLoginCta}
+            </button>
+          )}
+          <button
+            type="button"
+            className="ui-icon-button theme-button"
+            onClick={() => updateSetting('darkMode', !settings.darkMode)}
+            aria-label={t.darkModeLabel}
+          >
+            {settings.darkMode ? <SunIcon /> : <MoonIcon />}
+          </button>
+        </div>
       </header>
 
       <main className="chat-main">
@@ -931,9 +1324,22 @@ export default function App() {
         <div className={`conversation-area ${messages.length === 0 ? 'conversation-empty' : ''}`}>
           {messages.length === 0 ? (
             <div className="welcome-card">
-              <img className="welcome-logo" src="/logo.svg" alt="Zaka+" />
+              <img className="welcome-logo" src="/logo.png?v=6" alt="Plus AI" />
               <h1>{t.welcomeTitle}</h1>
               <p>{t.welcomeSubtitle}</p>
+              {!currentUser && (
+                <div className="welcome-auth-cta">
+                  <div className="welcome-auth-note">{t.authWelcomePrompt}</div>
+                  <button
+                    type="button"
+                    className="welcome-auth-button"
+                    data-testid="welcome-auth-button"
+                    onClick={() => openAuthDialog('login')}
+                  >
+                    {t.authLoginOrSignup}
+                  </button>
+                </div>
+              )}
             </div>
           ) : (
             <div className="message-list">
@@ -945,7 +1351,7 @@ export default function App() {
                   className={`message-row ${msg.role === 'user' ? 'message-user' : 'message-assistant'}`}
                 >
                   {msg.role === 'assistant' && (
-                    <img className="message-avatar" src="/logo.svg" alt="Zaka+" width="30" height="30" />
+                    <img className="message-avatar" src="/logo.png?v=6" alt="Plus AI" width="30" height="30" />
                   )}
                   <div className="message-bubble">
                     <div className="message-author">
@@ -1003,7 +1409,7 @@ export default function App() {
               ))}
               {isSending && (
                 <div className="message-row message-assistant">
-                  <img className="message-avatar" src="/logo.svg" alt="Zaka+" width="30" height="30" />
+                  <img className="message-avatar" src="/logo.png?v=6" alt="Plus AI" width="30" height="30" />
                   <div className="message-bubble typing-bubble">
                     <div className="message-author">{t.assistantLabel}</div>
                     <div className="typing-indicator" aria-label="Typing">
@@ -1020,8 +1426,29 @@ export default function App() {
 
         <div className="composer-area">
           {error && (
-            <div className="chat-error" role="alert">
+            <div
+              className={error === t.globalQuotaExhaustedMessage ? 'global-quota-notice' : 'chat-error'}
+              role="alert"
+            >
               {error}
+            </div>
+          )}
+
+          {!error && (globalCapacityExhausted || (dailyQuota && dailyQuota.validKeyCount > 0 && dailyQuota.remaining === 0)) && (
+            <div className="global-quota-notice" data-testid="global-quota-banner" role="status">
+              {t.globalQuotaExhaustedMessage}
+            </div>
+          )}
+
+          {credits.remaining <= 0 && (
+            <div
+              className={`credits-exhausted-notice ${creditsExhaustedHighlight ? 'credits-exhausted-notice-highlight' : ''}`}
+              data-testid="credits-exhausted-notice"
+              role="status"
+            >
+              <strong>{t.creditsExhaustedTitle}</strong>
+              <span>{t.creditsExhaustedDevNote}</span>
+              <small>{t.creditsExhaustedDesc}</small>
             </div>
           )}
 
@@ -1069,17 +1496,19 @@ export default function App() {
               {t.imageMode}
             </button>
 
-            {dailyQuota && (
+            <div className="composer-counters">
               <div
-                className={`daily-quota-status ${dailyQuota.remaining === 0 ? 'daily-quota-empty' : (dailyQuota.remaining <= 10 ? 'daily-quota-low' : '')}`}
-                data-testid="daily-quota-counter"
+                className={`credits-inline-meta ${credits.remaining === 0 ? 'credits-inline-empty' : ''}`}
+                data-testid="user-credits-counter"
                 role="status"
                 aria-live="polite"
               >
-                <span className="daily-quota-dot" aria-hidden="true" />
-                <span>{formatDailyQuotaText(dailyQuota.remaining, langMeta.code)}</span>
+                <span>{t.creditsRemainingLabel}:</span>
+                <strong>
+                  {credits.remaining} {credits.remaining === 1 ? t.creditsUnitSingle : t.creditsUnitPlural}
+                </strong>
               </div>
-            )}
+            </div>
 
             {settings.deepThinking && (
               <span className="thinking-hint">{t.deepThinkingHint}</span>
@@ -1264,6 +1693,21 @@ export default function App() {
               </div>
 
               <div className="settings-section">
+                <h3>{t.creditsSection}</h3>
+                <div className="settings-row">
+                  <div>
+                    <div className="settings-item-title">
+                      {t.creditsSettingsTitle}:{' '}
+                      <strong>
+                        {credits.remaining} {credits.remaining === 1 ? t.creditsUnitSingle : t.creditsUnitPlural}
+                      </strong>
+                    </div>
+                    <small>{t.creditsSettingsDesc}</small>
+                  </div>
+                </div>
+              </div>
+
+              <div className="settings-section">
                 <h3>{t.dataSection}</h3>
                 <div className="settings-row">
                   <div>
@@ -1280,12 +1724,41 @@ export default function App() {
                 </div>
                 <div className="settings-row">
                   <div className="settings-item-title">{t.versionLabel}</div>
-                  <span className="settings-version">Zaka+ 1.0</span>
+                  <span className="settings-version">Plus AI 1.0</span>
                 </div>
               </div>
             </div>
           </div>
         </div>
+      )}
+
+      <AuthModal
+        open={authModalOpen}
+        initialMode={authModalMode}
+        promptMessage={authPromptMessage}
+        onClose={() => {
+          setAuthModalOpen(false);
+          setAuthPromptMessage('');
+        }}
+        onSuccess={() => {
+          setAuthPromptMessage('');
+          setError('');
+        }}
+        t={t}
+      />
+
+      {userIsAdmin && (
+        <AdminPanelModal
+          open={adminModalOpen}
+          onClose={() => setAdminModalOpen(false)}
+          dailyQuota={dailyQuota}
+          onRefreshQuota={syncServerQuota}
+          usersList={adminUsersList}
+          analytics={adminAnalytics}
+          onUpdateUserSubscription={adminUpdateUserSubscription}
+          langCode={langMeta.code}
+          t={t}
+        />
       )}
     </div>
   );

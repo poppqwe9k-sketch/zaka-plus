@@ -18,7 +18,7 @@ test('calculates total daily capacity from valid keys (10 valid keys = 200 messa
   assert.equal(initial.validKeyCount, 10);
   assert.equal(initial.totalCapacity, 200);
   assert.equal(initial.remaining, 200);
-  assert.equal(formatDailyQuotaText(initial.remaining, 'ar'), 'لديك 200 رسالة متبقية (تتجدد كل 24 ساعة)');
+  assert.equal(formatDailyQuotaText(initial.remaining, 'ar'), 'السعة الكلية: 200 رسالة متبقية (تتجدد كل 24 ساعة)');
 
   const after3Messages = [1, 2, 3].reduce(
     (acc, idx) => applyMessageSendQuota(acc, { validKeyCount: 10, exhaustedKeyCount: 0, reachedModel: true, succeeded: true }, t0 + idx * 1000),

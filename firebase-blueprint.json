@@ -1,0 +1,127 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Registered Plus AI user account with plan tier, daily message credits, 24h cycle tracking, and visit count.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "Firebase Auth UID matching the document ID.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "description": "User email address.",
+          "minLength": 3,
+          "maxLength": 254
+        },
+        "displayName": {
+          "type": "string",
+          "description": "Display name shown in the sidebar and admin subscriptions table.",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "plan": {
+          "type": "string",
+          "description": "Subscription tier managed by admin.",
+          "enum": ["free", "pro", "vip"]
+        },
+        "dailyLimit": {
+          "type": "integer",
+          "description": "Daily renewable message allowance for this user (default 3)."
+        },
+        "remainingCredits": {
+          "type": "integer",
+          "description": "Current remaining message credits available for this user."
+        },
+        "cycleStartedAt": {
+          "type": "integer",
+          "description": "Epoch millisecond timestamp when the current 24h renewal cycle started."
+        },
+        "lastResetDate": {
+          "type": "string",
+          "description": "Local YYYY-MM-DD key of the last credit cycle reset.",
+          "minLength": 8,
+          "maxLength": 20
+        },
+        "totalUsed": {
+          "type": "integer",
+          "description": "Total AI messages consumed by the user."
+        },
+        "visitsCount": {
+          "type": "integer",
+          "description": "Total app sessions recorded for this user."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the account profile was created."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of the last account update."
+        },
+        "lastActiveAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of the user's most recent visit or activity."
+        }
+      },
+      "required": [
+        "uid",
+        "email",
+        "displayName",
+        "plan",
+        "dailyLimit",
+        "remainingCredits",
+        "cycleStartedAt",
+        "lastResetDate",
+        "totalUsed",
+        "visitsCount",
+        "createdAt",
+        "updatedAt",
+        "lastActiveAt"
+      ]
+    },
+    "SiteAnalytics": {
+      "title": "SiteAnalytics",
+      "description": "Global site visits and registered user counters readable exclusively by the admin.",
+      "type": "object",
+      "properties": {
+        "totalVisits": {
+          "type": "integer",
+          "description": "Cumulative app visits recorded across sessions."
+        },
+        "registeredUsersCount": {
+          "type": "integer",
+          "description": "Cumulative registered user profiles created."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of the last counter update."
+        }
+      },
+      "required": [
+        "totalVisits",
+        "registeredUsersCount",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{uid}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Per-user account profiles, daily 3-message credit balances, subscription plans, and visit counters."
+    },
+    "/analytics/{docId}": {
+      "schema": { "$ref": "#/entities/SiteAnalytics" },
+      "description": "Global app analytics document (/analytics/site) storing total visits and registered user counts."
+    }
+  }
+}

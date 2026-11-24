@@ -1,11 +1,22 @@
-/* Replace the legacy SVG-backed logo components with the generated PNG mark. */
-.chat-app img[src="/logo.svg"] {
-  content: url('/logo.png');
+/* Enforce full-bleed Plus AI black-and-white logo across every UI placement. */
+.chat-app img[src="/logo.svg"],
+.chat-app img[src^="/logo.png"] {
+  content: url('/logo.png?v=6');
+  object-fit: cover;
+}
+
+.chat-app .sidebar-brand img,
+.chat-app .message-avatar {
+  border-radius: 8px;
+}
+
+.chat-app .header-brand img {
+  border-radius: 9px;
 }
 
 .chat-app .welcome-logo {
   width: 72px;
   height: 72px;
-  object-fit: contain;
+  object-fit: cover;
   border-radius: 16px;
 }

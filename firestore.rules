@@ -1,0 +1,190 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global default-deny safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isAdmin() {
+      return isSignedIn()
+        && request.auth.token.email is string
+        && request.auth.token.email.lower() == 'poppqwe9k@gmail.com'
+        && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function isValidUserProfile(data) {
+      return data.keys().hasAll([
+          'uid',
+          'email',
+          'displayName',
+          'plan',
+          'dailyLimit',
+          'remainingCredits',
+          'cycleStartedAt',
+          'lastResetDate',
+          'totalUsed',
+          'visitsCount',
+          'createdAt',
+          'updatedAt',
+          'lastActiveAt'
+        ])
+        && data.keys().hasOnly([
+          'uid',
+          'email',
+          'displayName',
+          'plan',
+          'dailyLimit',
+          'remainingCredits',
+          'cycleStartedAt',
+          'lastResetDate',
+          'totalUsed',
+          'visitsCount',
+          'createdAt',
+          'updatedAt',
+          'lastActiveAt'
+        ])
+        && isValidId(data.uid)
+        && data.email is string && data.email.size() >= 3 && data.email.size() <= 254
+        && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 100
+        && data.plan in ['free', 'pro', 'vip']
+        && data.dailyLimit is int && data.dailyLimit >= 1 && data.dailyLimit <= 10000
+        && data.remainingCredits is int && data.remainingCredits >= 0 && data.remainingCredits <= 100000
+        && data.cycleStartedAt is int && data.cycleStartedAt >= 0
+        && data.lastResetDate is string && data.lastResetDate.size() >= 8 && data.lastResetDate.size() <= 20
+        && data.totalUsed is int && data.totalUsed >= 0 && data.totalUsed <= 10000000
+        && data.visitsCount is int && data.visitsCount >= 0 && data.visitsCount <= 10000000
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp
+        && data.lastActiveAt is timestamp;
+    }
+
+    function isValidSiteAnalytics(data) {
+      return data.keys().hasAll(['totalVisits', 'registeredUsersCount', 'updatedAt'])
+        && data.keys().hasOnly(['totalVisits', 'registeredUsersCount', 'updatedAt'])
+        && data.totalVisits is int && data.totalVisits >= 0 && data.totalVisits <= 1000000000
+        && data.registeredUsersCount is int && data.registeredUsersCount >= 0 && data.registeredUsersCount <= 100000000
+        && data.updatedAt is timestamp;
+    }
+
+    match /users/{uid} {
+      allow get: if isValidId(uid) && isSignedIn() && (isOwner(uid) || isAdmin());
+      allow list: if isAdmin();
+
+      allow create: if isValidId(uid)
+        && isSignedIn()
+        && isValidUserProfile(incoming())
+        && incoming().uid == uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && incoming().lastActiveAt == request.time
+        && (
+          isAdmin() || (
+            isOwner(uid)
+            && incoming().plan == 'free'
+            && incoming().dailyLimit == 3
+            && incoming().remainingCredits == 3
+            && incoming().totalUsed == 0
+            && incoming().visitsCount == 1
+          )
+        );
+
+      allow update: if isValidId(uid)
+        && isSignedIn()
+        && isValidUserProfile(incoming())
+        && incoming().uid == existing().uid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          (isAdmin()
+            && incoming().diff(existing()).affectedKeys().hasOnly(['plan', 'dailyLimit', 'remainingCredits', 'updatedAt'])
+          ) ||
+          (isOwner(uid)
+            && incoming().plan == existing().plan
+            && incoming().dailyLimit == existing().dailyLimit
+            && (
+              // Action 1: Consume 1 credit after real AI response
+              (incoming().diff(existing()).affectedKeys().hasOnly(['remainingCredits', 'totalUsed', 'updatedAt', 'lastActiveAt'])
+                && existing().remainingCredits >= 1
+                && incoming().remainingCredits == existing().remainingCredits - 1
+                && incoming().totalUsed == existing().totalUsed + 1
+                && incoming().lastActiveAt == request.time
+              ) ||
+              // Action 2: Strict 24h cycle renewal back to dailyLimit
+              (incoming().diff(existing()).affectedKeys().hasOnly(['remainingCredits', 'cycleStartedAt', 'lastResetDate', 'updatedAt', 'lastActiveAt'])
+                && incoming().cycleStartedAt - existing().cycleStartedAt >= 86400000
+                && incoming().cycleStartedAt <= request.time.toMillis() + 60000
+                && incoming().remainingCredits >= existing().dailyLimit
+                && incoming().remainingCredits <= (existing().remainingCredits > existing().dailyLimit ? existing().remainingCredits : existing().dailyLimit)
+                && incoming().lastActiveAt == request.time
+              ) ||
+              // Action 4: Record session visit & displayName sync
+              (incoming().diff(existing()).affectedKeys().hasOnly(['visitsCount', 'lastActiveAt', 'updatedAt', 'displayName'])
+                && incoming().visitsCount >= existing().visitsCount
+                && incoming().visitsCount <= existing().visitsCount + 1
+                && incoming().lastActiveAt == request.time
+              )
+            )
+          )
+        );
+
+      allow delete: if false;
+    }
+
+    match /analytics/{docId} {
+      allow get: if isValidId(docId) && docId == 'site' && isAdmin();
+      allow list: if false;
+
+      allow create: if isValidId(docId)
+        && docId == 'site'
+        && isSignedIn()
+        && isValidSiteAnalytics(incoming())
+        && incoming().totalVisits >= 0 && incoming().totalVisits <= 1
+        && incoming().registeredUsersCount >= 0 && incoming().registeredUsersCount <= 1
+        && incoming().updatedAt == request.time;
+
+      allow update: if isValidId(docId)
+        && docId == 'site'
+        && isSignedIn()
+        && isValidSiteAnalytics(incoming())
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['totalVisits', 'registeredUsersCount', 'updatedAt'])
+        && (
+          isAdmin() || (
+            incoming().totalVisits >= existing().totalVisits
+            && incoming().totalVisits <= existing().totalVisits + 1
+            && incoming().registeredUsersCount >= existing().registeredUsersCount
+            && incoming().registeredUsersCount <= existing().registeredUsersCount + 1
+          )
+        );
+
+      allow delete: if false;
+    }
+
+    match /test/{docId} {
+      allow get: if isValidId(docId) && docId == 'connection' && isSignedIn();
+      allow list, write: if false;
+    }
+  }
+}

@@ -1,11 +1,15 @@
-const CACHE_NAME = 'zaka-plus-v7';
+const CACHE_NAME = 'zaka-plus-v10';
 const APP_CACHE_PREFIX = 'zaka-plus-';
 const APP_SHELL = [
   '/',
   '/index.html',
-  '/manifest.json?v=4',
-  '/logo.png?v=4',
-  '/logo.svg'
+  '/manifest.json?v=5',
+  '/logo.png?v=6',
+  '/pwa-192x192.png?v=5',
+  '/pwa-512x512.png?v=5',
+  '/apple-touch-icon.png?v=5',
+  '/favicon-32x32.png?v=5',
+  '/favicon.ico?v=5'
 ];
 
 self.addEventListener('install', (event) => {
@@ -71,6 +75,7 @@ self.addEventListener('fetch', (event) => {
     || url.pathname === '/manifest.json'
     || url.pathname === '/manifest.webmanifest'
     || url.pathname.endsWith('.png')
+    || url.pathname.endsWith('.ico')
     || url.pathname.endsWith('.svg')
   ) {
     event.respondWith(

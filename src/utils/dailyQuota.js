@@ -146,27 +146,27 @@ export function saveDailyQuotaState(state, storage = typeof localStorage !== 'un
 export function formatDailyQuotaText(remaining, lang = 'ar') {
   const safeRemaining = toNonNegInt(remaining, 0);
   if (lang === 'ar') {
-    return `لديك ${safeRemaining} رسالة متبقية (تتجدد كل 24 ساعة)`;
+    return `السعة الكلية: ${safeRemaining} رسالة متبقية (تتجدد كل 24 ساعة)`;
   }
   if (lang === 'fa') {
-    return `${safeRemaining} پیام باقی مانده است (تمدید هر ۲۴ ساعت)`;
+    return `ظرفیت کل: ${safeRemaining} پیام باقی مانده (تمدید هر ۲۴ ساعت)`;
   }
   if (lang === 'ur') {
-    return `آپ کے پاس ${safeRemaining} پیغامات باقی ہیں (ہر 24 گھنٹے بعد تجدید)`;
+    return `کل گنجائش: ${safeRemaining} پیغامات باقی ہیں (ہر 24 گھنٹے بعد تجدید)`;
   }
   if (lang === 'fr') {
-    return `${safeRemaining} messages restants (renouvelés toutes les 24 h)`;
+    return `Capacité globale : ${safeRemaining} messages restants (24 h)`;
   }
   if (lang === 'es') {
-    return `${safeRemaining} mensajes restantes (se renuevan cada 24 h)`;
+    return `Capacidad global: ${safeRemaining} mensajes restantes (24 h)`;
   }
   if (lang === 'de') {
-    return `${safeRemaining} Nachrichten übrig (Erneuerung alle 24 Std.)`;
+    return `Gesamtkapazität: ${safeRemaining} Nachrichten übrig (24 Std.)`;
   }
   if (lang === 'tr') {
-    return `${safeRemaining} mesaj hakkı kaldı (24 saatte bir yenilenir)`;
+    return `Toplam kapasite: ${safeRemaining} mesaj hakkı kaldı (24 saat)`;
   }
   return safeRemaining === 1
-    ? '1 message remaining (resets every 24 hours)'
-    : `${safeRemaining} messages remaining (resets every 24 hours)`;
+    ? 'Total capacity: 1 message remaining (resets every 24 hours)'
+    : `Total capacity: ${safeRemaining} messages remaining (resets every 24 hours)`;
 }
