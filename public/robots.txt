@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://zaka-plus-web.poppqwe9k.workers.dev/sitemap.xml
