@@ -34,6 +34,7 @@ self.addEventListener('fetch', (event) => {
     request.method !== 'GET'
     || url.origin !== self.location.origin
     || url.pathname.startsWith('/api/')
+    || url.pathname.startsWith('/__/')
     || url.pathname.startsWith('/@')
     || url.pathname.startsWith('/node_modules/')
   ) {
