@@ -9,6 +9,7 @@ import {
   isPaidPlanUser,
   normalizePlan
 } from '../utils/authAdmin.js';
+import { formatPacificResetCountdown } from '../utils/pacificTime.js';
 
 function formatCapacityNumber(value) {
   return Math.max(0, Math.floor(Number(value) || 0)).toLocaleString('en-US');
@@ -200,6 +201,7 @@ export default function AdminPanelModal({
   const [errorMsg, setErrorMsg] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const [refreshNotice, setRefreshNotice] = useState('');
+  const [nowMs, setNowMs] = useState(() => Date.now());
 
   const refreshTimerRef = useRef(null);
 
@@ -210,6 +212,7 @@ export default function AdminPanelModal({
       setRefreshNotice('');
       setActiveDirectoryTab('paid');
       setVisitsUsersOpen(Boolean(initialVisitsUsersOpen));
+      setNowMs(Date.now());
       onRefreshQuota?.();
     }
     return () => {
@@ -220,9 +223,21 @@ export default function AdminPanelModal({
     };
   }, [open, onRefreshQuota, initialVisitsUsersOpen]);
 
+  useEffect(() => {
+    if (!open) return undefined;
+    const ticker = window.setInterval(() => {
+      setNowMs(Date.now());
+    }, 1000);
+    return () => window.clearInterval(ticker);
+  }, [open]);
+
   const dualCapacity = useMemo(
-    () => computeDualModelCapacitySummary({ dailyQuota, plusDailyQuota, quotaAnalytics }),
-    [dailyQuota, plusDailyQuota, quotaAnalytics]
+    () => computeDualModelCapacitySummary({ dailyQuota, plusDailyQuota, quotaAnalytics, now: nowMs }),
+    [dailyQuota, plusDailyQuota, quotaAnalytics, nowMs]
+  );
+  const ptCountdown = useMemo(
+    () => formatPacificResetCountdown(nowMs),
+    [nowMs]
   );
   const allUsersSorted = useMemo(() => filterAndSortUsers(usersList, ''), [usersList]);
   const paidUsersCount = useMemo(
@@ -341,8 +356,8 @@ export default function AdminPanelModal({
             <div className="admin-models-capacity-grid">
               <div className="admin-capacity-card" data-testid="admin-capacity-plus-plus">
                 <div className="admin-capacity-model-head">
-                  <strong className="admin-capacity-model-title">
-                    {t.adminModelPlusPlusTitle || 'نموذج بلس بلاس (جيمناي 4 هيدروجين)'}
+                  <strong className="admin-capacity-model-title" dir="auto">
+                    {t.adminModelPlusPlusTitle || 'نموذج بلس بلاس (gemini-4-hydrogen)'}
                   </strong>
                   <span className="admin-capacity-percent">{dualCapacity.plusPlus.percentRemaining}%</span>
                 </div>
@@ -359,6 +374,23 @@ export default function AdminPanelModal({
                     style={{ width: `${dualCapacity.plusPlus.percentRemaining}%` }}
                   />
                 </div>
+                <div className="admin-capacity-chars-row" data-testid="admin-chars-plus-plus">
+                  <span className="admin-capacity-chars-label">
+                    {t.adminCharsUsedTodayLabel || 'إجمالي الحروف المستهلكة اليوم'}
+                  </span>
+                  <strong className="admin-capacity-chars-value">
+                    {formatCapacityNumber(dualCapacity.plusPlus.charsUsed)} {t.adminCharsUnit || 'حرف'}
+                  </strong>
+                </div>
+                <div className="admin-capacity-reset-row" data-testid="admin-reset-countdown-plus-plus">
+                  <span>
+                    {t.adminResetCountdownLabel || 'التصفير التلقائي خلال'}:{' '}
+                    <strong className="admin-reset-timer" dir="ltr">{ptCountdown.formatted}</strong>
+                  </span>
+                  <span className="admin-reset-baghdad">
+                    ({ptCountdown.baghdadResetTime} {t.adminResetBaghdadSuffix || 'بتوقيت جوجل (بغداد)'})
+                  </span>
+                </div>
                 <span className="admin-section-meta">
                   {dualCapacity.plusPlus.validKeyCount > 0
                     ? `${dualCapacity.plusPlus.validKeyCount} ${t.adminActiveKeysLabel} · ${t.adminRenews24h}`
@@ -368,7 +400,7 @@ export default function AdminPanelModal({
 
               <div className="admin-capacity-card" data-testid="admin-capacity-plus">
                 <div className="admin-capacity-model-head">
-                  <strong className="admin-capacity-model-title">
+                  <strong className="admin-capacity-model-title" dir="auto">
                     {t.adminModelPlusTitle || 'نموذج بلس (gemini-3.5-flash-lite)'}
                   </strong>
                   <span className="admin-capacity-percent">{dualCapacity.plus.percentRemaining}%</span>
@@ -385,6 +417,23 @@ export default function AdminPanelModal({
                     data-testid="admin-progress-plus"
                     style={{ width: `${dualCapacity.plus.percentRemaining}%` }}
                   />
+                </div>
+                <div className="admin-capacity-chars-row" data-testid="admin-chars-plus">
+                  <span className="admin-capacity-chars-label">
+                    {t.adminCharsUsedTodayLabel || 'إجمالي الحروف المستهلكة اليوم'}
+                  </span>
+                  <strong className="admin-capacity-chars-value">
+                    {formatCapacityNumber(dualCapacity.plus.charsUsed)} {t.adminCharsUnit || 'حرف'}
+                  </strong>
+                </div>
+                <div className="admin-capacity-reset-row" data-testid="admin-reset-countdown-plus">
+                  <span>
+                    {t.adminResetCountdownLabel || 'التصفير التلقائي خلال'}:{' '}
+                    <strong className="admin-reset-timer" dir="ltr">{ptCountdown.formatted}</strong>
+                  </span>
+                  <span className="admin-reset-baghdad">
+                    ({ptCountdown.baghdadResetTime} {t.adminResetBaghdadSuffix || 'بتوقيت جوجل (بغداد)'})
+                  </span>
                 </div>
                 <span className="admin-section-meta">
                   {dualCapacity.plus.validKeyCount > 0

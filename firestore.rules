@@ -128,11 +128,30 @@ service cloud.firestore {
     }
 
     function isValidModelQuotaAnalytics(data) {
-      return data.keys().hasAll(['cycleStartedAt', 'plusPlusUsed', 'plusUsed', 'updatedAt'])
-        && data.keys().hasOnly(['cycleStartedAt', 'plusPlusUsed', 'plusUsed', 'updatedAt'])
+      return data.keys().hasAll([
+          'cycleStartedAt',
+          'ptDateKey',
+          'plusPlusUsed',
+          'plusUsed',
+          'plusPlusChars',
+          'plusChars',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'cycleStartedAt',
+          'ptDateKey',
+          'plusPlusUsed',
+          'plusUsed',
+          'plusPlusChars',
+          'plusChars',
+          'updatedAt'
+        ])
         && data.cycleStartedAt is int && data.cycleStartedAt >= 0
+        && data.ptDateKey is string && data.ptDateKey.size() >= 8 && data.ptDateKey.size() <= 16
         && data.plusPlusUsed is int && data.plusPlusUsed >= 0 && data.plusPlusUsed <= 1000000
         && data.plusUsed is int && data.plusUsed >= 0 && data.plusUsed <= 1000000
+        && data.plusPlusChars is int && data.plusPlusChars >= 0 && data.plusPlusChars <= 500000000
+        && data.plusChars is int && data.plusChars >= 0 && data.plusChars <= 500000000
         && data.updatedAt is timestamp;
     }
 
@@ -259,6 +278,8 @@ service cloud.firestore {
             && incoming().plusPlusUsed >= 0 && incoming().plusPlusUsed <= 1
             && incoming().plusUsed >= 0 && incoming().plusUsed <= 1
             && (incoming().plusPlusUsed + incoming().plusUsed) <= 1
+            && incoming().plusPlusChars >= 0 && incoming().plusPlusChars <= 200000
+            && incoming().plusChars >= 0 && incoming().plusChars <= 200000
             && incoming().updatedAt == request.time
           )
         );
@@ -284,25 +305,66 @@ service cloud.firestore {
             && incoming().updatedAt == request.time
             && (
               (isAdmin()
-                && incoming().diff(existing()).affectedKeys().hasOnly(['cycleStartedAt', 'plusPlusUsed', 'plusUsed', 'updatedAt'])
+                && incoming().diff(existing()).affectedKeys().hasOnly([
+                  'cycleStartedAt',
+                  'ptDateKey',
+                  'plusPlusUsed',
+                  'plusUsed',
+                  'plusPlusChars',
+                  'plusChars',
+                  'updatedAt'
+                ])
               ) ||
-              (incoming().diff(existing()).affectedKeys().hasOnly(['plusPlusUsed', 'updatedAt'])
-                && request.time.toMillis() - existing().cycleStartedAt < 86400000
+              (incoming().diff(existing()).affectedKeys().hasOnly(['plusPlusUsed', 'plusPlusChars', 'updatedAt'])
+                && 'ptDateKey' in existing()
+                && 'plusPlusChars' in existing()
+                && 'plusChars' in existing()
+                && request.time.toMillis() - existing().cycleStartedAt < 90000000
+                && incoming().cycleStartedAt == existing().cycleStartedAt
+                && incoming().ptDateKey == existing().ptDateKey
                 && incoming().plusPlusUsed == existing().plusPlusUsed + 1
                 && incoming().plusUsed == existing().plusUsed
+                && incoming().plusChars == existing().plusChars
+                && incoming().plusPlusChars >= existing().plusPlusChars
+                && incoming().plusPlusChars <= existing().plusPlusChars + 200000
               ) ||
-              (incoming().diff(existing()).affectedKeys().hasOnly(['plusUsed', 'updatedAt'])
-                && request.time.toMillis() - existing().cycleStartedAt < 86400000
+              (incoming().diff(existing()).affectedKeys().hasOnly(['plusUsed', 'plusChars', 'updatedAt'])
+                && 'ptDateKey' in existing()
+                && 'plusPlusChars' in existing()
+                && 'plusChars' in existing()
+                && request.time.toMillis() - existing().cycleStartedAt < 90000000
+                && incoming().cycleStartedAt == existing().cycleStartedAt
+                && incoming().ptDateKey == existing().ptDateKey
                 && incoming().plusUsed == existing().plusUsed + 1
                 && incoming().plusPlusUsed == existing().plusPlusUsed
+                && incoming().plusPlusChars == existing().plusPlusChars
+                && incoming().plusChars >= existing().plusChars
+                && incoming().plusChars <= existing().plusChars + 200000
               ) ||
-              (incoming().diff(existing()).affectedKeys().hasOnly(['cycleStartedAt', 'plusPlusUsed', 'plusUsed', 'updatedAt'])
-                && request.time.toMillis() - existing().cycleStartedAt >= 86340000
-                && incoming().cycleStartedAt - existing().cycleStartedAt >= 86400000
+              (incoming().diff(existing()).affectedKeys().hasOnly([
+                  'cycleStartedAt',
+                  'ptDateKey',
+                  'plusPlusUsed',
+                  'plusUsed',
+                  'plusPlusChars',
+                  'plusChars',
+                  'updatedAt'
+                ])
+                && (
+                  !('ptDateKey' in existing())
+                  || (
+                    request.time.toMillis() - existing().cycleStartedAt >= 82800000
+                    && incoming().cycleStartedAt - existing().cycleStartedAt >= 82800000
+                    && incoming().ptDateKey != existing().ptDateKey
+                  )
+                )
                 && incoming().cycleStartedAt <= request.time.toMillis() + 60000
+                && request.time.toMillis() - incoming().cycleStartedAt < 90000000
                 && incoming().plusPlusUsed >= 0 && incoming().plusPlusUsed <= 1
                 && incoming().plusUsed >= 0 && incoming().plusUsed <= 1
                 && (incoming().plusPlusUsed + incoming().plusUsed) <= 1
+                && incoming().plusPlusChars >= 0 && incoming().plusPlusChars <= 200000
+                && incoming().plusChars >= 0 && incoming().plusChars <= 200000
               )
             )
           )

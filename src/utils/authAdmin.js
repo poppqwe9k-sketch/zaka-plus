@@ -1,4 +1,9 @@
 import { CREDITS_CYCLE_MS, DAILY_FREE_CREDITS, getLocalDateKey } from './credits.js';
+import {
+  getNextPacificResetMs,
+  getPacificDateKey,
+  isPacificCycleExpired
+} from './pacificTime.js';
 
 export const ADMIN_EMAIL = 'poppqwe9k@gmail.com';
 export const GLOBAL_ADMIN_CAPACITY_TARGET = 200;
@@ -112,20 +117,43 @@ export function computeAdminCapacitySummary(
   };
 }
 
-function summarizeSingleModelCapacity(state, targetCapacity, dbUsed = null, fallbackValidKeys = 0) {
-  const base = computeAdminCapacitySummary(state, targetCapacity);
-  const effectiveValidKeys = state && typeof state === 'object'
+function summarizeSingleModelCapacity(
+  state,
+  targetCapacity,
+  dbUsed = null,
+  fallbackValidKeys = 0,
+  dbChars = null,
+  now = Date.now()
+) {
+  const stateExpired = Boolean(
+    state
+    && typeof state === 'object'
+    && state.cycleStartedAt
+    && isPacificCycleExpired(state.cycleStartedAt, state.ptDateKey || '', now)
+  );
+  const effectiveState = state && typeof state === 'object' && stateExpired
+    ? {
+        ...state,
+        exhaustedKeyCount: 0,
+        usedCount: 0,
+        remaining: Math.max(0, Number(state.totalCapacity) || 0),
+        charsUsed: 0
+      }
+    : state;
+
+  const base = computeAdminCapacitySummary(effectiveState, targetCapacity);
+  const effectiveValidKeys = effectiveState && typeof effectiveState === 'object'
     ? base.validKeyCount
     : Math.max(0, Math.floor(Number(fallbackValidKeys) || 0));
 
   let remaining = base.remaining;
   if (dbUsed !== null) {
-    if (state && typeof state === 'object' && base.validKeyCount === 0) {
+    if (effectiveState && typeof effectiveState === 'object' && base.validKeyCount === 0) {
       remaining = 0;
     } else {
       const dbRemaining = Math.max(0, targetCapacity - dbUsed);
       const hasExhaustedServerKeys = Boolean(
-        state && typeof state === 'object' && Number(state.exhaustedKeyCount) > 0
+        effectiveState && typeof effectiveState === 'object' && Number(effectiveState.exhaustedKeyCount) > 0
       );
       remaining = hasExhaustedServerKeys ? Math.min(dbRemaining, base.remaining) : dbRemaining;
     }
@@ -135,11 +163,16 @@ function summarizeSingleModelCapacity(state, targetCapacity, dbUsed = null, fall
   const percentRemaining = targetCapacity > 0
     ? Math.max(0, Math.min(100, Math.round((remaining / targetCapacity) * 100)))
     : 0;
+  const localChars = Math.max(0, Math.floor(Number(effectiveState?.charsUsed) || 0));
+  const charsUsed = dbChars !== null
+    ? Math.max(0, Math.floor(Number(dbChars) || 0))
+    : localChars;
 
   return {
     targetCapacity,
     remaining,
     used,
+    charsUsed,
     percentRemaining,
     validKeyCount: effectiveValidKeys,
     actualCapacity: base.actualCapacity
@@ -160,7 +193,7 @@ export function computeDualModelCapacitySummary({
     && cycleStartedAt > 0
   );
   const dbExpired = hasDbDoc
-    ? (now < cycleStartedAt || now - cycleStartedAt >= CREDITS_CYCLE_MS)
+    ? isPacificCycleExpired(cycleStartedAt, quotaAnalytics.ptDateKey || '', now)
     : false;
   const dbPlusPlusUsed = hasDbDoc
     ? (dbExpired ? 0 : Math.max(0, Math.floor(Number(quotaAnalytics.plusPlusUsed) || 0)))
@@ -168,20 +201,36 @@ export function computeDualModelCapacitySummary({
   const dbPlusUsed = hasDbDoc
     ? (dbExpired ? 0 : Math.max(0, Math.floor(Number(quotaAnalytics.plusUsed) || 0)))
     : null;
+  const dbPlusPlusChars = hasDbDoc
+    ? (dbExpired ? 0 : Math.max(0, Math.floor(Number(quotaAnalytics.plusPlusChars) || 0)))
+    : null;
+  const dbPlusChars = hasDbDoc
+    ? (dbExpired ? 0 : Math.max(0, Math.floor(Number(quotaAnalytics.plusChars) || 0)))
+    : null;
 
   const plusPlus = summarizeSingleModelCapacity(
     dailyQuota,
     PLUS_PLUS_ADMIN_CAPACITY_TARGET,
-    dbPlusPlusUsed
+    dbPlusPlusUsed,
+    0,
+    dbPlusPlusChars,
+    now
   );
   const plus = summarizeSingleModelCapacity(
     plusDailyQuota,
     PLUS_ADMIN_CAPACITY_TARGET,
     dbPlusUsed,
-    plusPlus.validKeyCount
+    plusPlus.validKeyCount,
+    dbPlusChars,
+    now
   );
 
-  return { plusPlus, plus };
+  return {
+    plusPlus,
+    plus,
+    ptDateKey: getPacificDateKey(now),
+    nextResetAt: getNextPacificResetMs(now)
+  };
 }
 
 export function isUserProfileCycleExpired(profile, now = Date.now()) {

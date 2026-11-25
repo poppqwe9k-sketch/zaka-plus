@@ -93,6 +93,11 @@ import {
   syncUserProfileOnSignIn,
   upsertUserChatInFirestore
 } from './services/userAccountService.js';
+import {
+  calculateExchangeCharCount,
+  getPacificCycleStartMs,
+  getPacificDateKey
+} from './utils/pacificTime.js';
 import { buildSharePayload, shareOrCopyApp } from './utils/shareApp.js';
 
 const MAX_ATTACHMENT_BYTES = 7 * 1024 * 1024;
@@ -343,11 +348,14 @@ export default function App() {
   const [adminModalOpen, setAdminModalOpen] = useState(false);
   const [adminUsersList, setAdminUsersList] = useState([]);
   const [adminAnalytics, setAdminAnalytics] = useState({ totalVisits: 0, registeredUsersCount: 0 });
-  const [adminQuotaAnalytics, setAdminQuotaAnalytics] = useState({
-    cycleStartedAt: 0,
+  const [adminQuotaAnalytics, setAdminQuotaAnalytics] = useState(() => ({
+    cycleStartedAt: getPacificCycleStartMs(),
+    ptDateKey: getPacificDateKey(),
     plusPlusUsed: 0,
-    plusUsed: 0
-  });
+    plusUsed: 0,
+    plusPlusChars: 0,
+    plusChars: 0
+  }));
   const [shareStatus, setShareStatus] = useState(null);
   const shareTimerRef = useRef(null);
 
@@ -601,7 +609,14 @@ export default function App() {
     if (!authReady || !userIsAdmin) {
       setAdminUsersList([]);
       setAdminAnalytics({ totalVisits: 0, registeredUsersCount: 0 });
-      setAdminQuotaAnalytics({ cycleStartedAt: 0, plusPlusUsed: 0, plusUsed: 0 });
+      setAdminQuotaAnalytics({
+        cycleStartedAt: getPacificCycleStartMs(),
+        ptDateKey: getPacificDateKey(),
+        plusPlusUsed: 0,
+        plusUsed: 0,
+        plusPlusChars: 0,
+        plusChars: 0
+      });
       return undefined;
     }
 
@@ -1369,6 +1384,7 @@ export default function App() {
       const primaryExhausted = Boolean(data?.primaryCapacityExhausted);
       const usedPlusPlus = data?.usedTier === SUPER_MODEL_TIER
         || (!data?.usedTier && !usedFallback && data?.model === GEMINI_HYDROGEN_MODEL_ID);
+      const consumedChars = calculateExchangeCharCount(trimmed, replyText);
       setGlobalCapacityExhausted(primaryExhausted || (useFallbackMode && globalCapacityExhausted));
 
       if (usedPlusPlus) {
@@ -1376,11 +1392,13 @@ export default function App() {
           ? {
               ...data.quotaMeta,
               reachedModel: true,
-              succeeded: true
+              succeeded: true,
+              charsCount: consumedChars
             }
           : {
               reachedModel: true,
-              succeeded: true
+              succeeded: true,
+              charsCount: consumedChars
             };
         setDailyQuota((prev) => {
           const base = prev || loadDailyQuotaState(undefined, QUOTA_STORAGE_KEY);
@@ -1406,12 +1424,14 @@ export default function App() {
               ...data.plusQuotaMeta,
               quotaPerKey: data.plusQuotaMeta.quotaPerKey || PLUS_QUOTA_PER_KEY,
               reachedModel: true,
-              succeeded: true
+              succeeded: true,
+              charsCount: consumedChars
             }
           : {
               quotaPerKey: PLUS_QUOTA_PER_KEY,
               reachedModel: true,
-              succeeded: true
+              succeeded: true,
+              charsCount: consumedChars
             };
         setPlusDailyQuota((prev) => {
           const base = prev || loadDailyQuotaState(undefined, PLUS_QUOTA_STORAGE_KEY);
@@ -1422,7 +1442,7 @@ export default function App() {
       }
 
       if (currentUser?.uid) {
-        recordModelUsageInFirestore(usedPlusPlus ? SUPER_MODEL_TIER : FAST_MODEL_TIER)
+        recordModelUsageInFirestore(usedPlusPlus ? SUPER_MODEL_TIER : FAST_MODEL_TIER, consumedChars)
           .then((updatedQuotaDoc) => {
             if (updatedQuotaDoc && userIsAdmin) {
               setAdminQuotaAnalytics(updatedQuotaDoc);
@@ -1927,25 +1947,29 @@ export default function App() {
                     ) : (
                       <>
                         <div className="message-text">{msg.content}</div>
-                        {msg.role === 'assistant' && sanitizeClientSources(msg.sources).length > 0 && (
-                          <div className="message-sources" data-testid="message-sources">
-                            <div className="message-sources-title">{t.sourcesHeading}</div>
-                            <div className="message-sources-list">
-                              {sanitizeClientSources(msg.sources).map((src, idx) => (
-                                <a
-                                  key={`${src.uri}-${idx}`}
-                                  href={src.uri}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="message-source-chip"
-                                >
-                                  <ExternalLinkIcon />
-                                  <span>{src.title}</span>
-                                </a>
-                              ))}
+                        {msg.role === 'assistant' && (() => {
+                          const msgSources = sanitizeClientSources(msg.sources);
+                          if (msgSources.length === 0) return null;
+                          return (
+                            <div className="message-sources" data-testid="message-sources">
+                              <div className="message-sources-title">{t.sourcesHeading}</div>
+                              <div className="message-sources-list">
+                                {msgSources.map((src, idx) => (
+                                  <a
+                                    key={`${src.uri}-${idx}`}
+                                    href={src.uri}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="message-source-chip"
+                                  >
+                                    <ExternalLinkIcon />
+                                    <span>{src.title}</span>
+                                  </a>
+                                ))}
+                              </div>
                             </div>
-                          </div>
-                        )}
+                          );
+                        })()}
                       </>
                     )}
                   </div>

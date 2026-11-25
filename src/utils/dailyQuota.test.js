@@ -105,23 +105,29 @@ test('aligns remaining quota with server 429 key exhaustion without double-penal
   assert.equal(afterAllExhausted.remaining, 0);
 });
 
-test('automatically resets remaining quota back to full key capacity after 24 hours', () => {
-  const t0 = 1_700_000_000_000;
+test('automatically resets remaining quota and charsUsed at 00:00 America/Los_Angeles (Google PT midnight)', () => {
+  // 2026-11-24 23:00:00 PST (2026-11-25 07:00:00 UTC) -> 1 hour before PT midnight reset (08:00:00 UTC)
+  const t0 = Date.UTC(2026, 10, 25, 7, 0, 0);
   const start = createFreshQuotaState({ validKeyCount: 10, now: t0 });
   const depleted = applyMessageSendQuota(start, {
     validKeyCount: 10,
     exhaustedKeyCount: 2,
     reachedModel: true,
-    succeeded: true
+    succeeded: true,
+    charsCount: 345
   }, t0 + 5000);
   assert.equal(depleted.remaining, 159);
+  assert.equal(depleted.charsUsed, 345);
 
-  // Just before 24 hours: still on same cycle
-  const before24h = reconcileQuotaState(depleted, { validKeyCount: 10, exhaustedKeyCount: 2 }, t0 + QUOTA_CYCLE_MS - 1);
-  assert.equal(before24h.cycleStartedAt, t0);
-  assert.equal(before24h.remaining, 159);
+  // Just before 00:00 America/Los_Angeles (23:59:59 PST = 07:59:59 UTC): still on same cycle
+  const justBeforePtMidnight = Date.UTC(2026, 10, 25, 7, 59, 59);
+  const beforeReset = reconcileQuotaState(depleted, { validKeyCount: 10, exhaustedKeyCount: 2 }, justBeforePtMidnight);
+  assert.equal(beforeReset.ptDateKey, '2026-11-24');
+  assert.equal(beforeReset.remaining, 159);
+  assert.equal(beforeReset.charsUsed, 345);
 
-  // Exactly 24 hours elapsed: even before serverMeta arrives ({}), stale exhaustedKeyCount=10 must NOT carry over
+  // Exactly at 00:00:00 America/Los_Angeles (08:00:00 UTC / 11:00 AM Baghdad): resets quota and charsUsed cleanly
+  const exactPtMidnight = Date.UTC(2026, 10, 25, 8, 0, 0);
   const depletedAll = applyMessageSendQuota(start, {
     validKeyCount: 10,
     exhaustedKeyCount: 10,
@@ -130,15 +136,17 @@ test('automatically resets remaining quota back to full key capacity after 24 ho
     succeeded: false
   }, t0 + 6000);
   assert.equal(depletedAll.remaining, 0);
-  const clientBootAt24h = reconcileQuotaState(depletedAll, {}, t0 + QUOTA_CYCLE_MS);
-  assert.equal(clientBootAt24h.remaining, 200);
-  assert.equal(clientBootAt24h.usedCount, 0);
-  assert.equal(clientBootAt24h.exhaustedKeyCount, 0);
+  const clientBootAtPtMidnight = reconcileQuotaState(depletedAll, {}, exactPtMidnight);
+  assert.equal(clientBootAtPtMidnight.ptDateKey, '2026-11-25');
+  assert.equal(clientBootAtPtMidnight.remaining, 200);
+  assert.equal(clientBootAtPtMidnight.usedCount, 0);
+  assert.equal(clientBootAtPtMidnight.charsUsed, 0);
+  assert.equal(clientBootAtPtMidnight.exhaustedKeyCount, 0);
 
   // Subsequent server sync within the fresh cycle preserves full 200 and expands cleanly to 260 on 13 keys
-  const afterServerSync = reconcileQuotaState(clientBootAt24h, { validKeyCount: 10, exhaustedKeyCount: 0 }, t0 + QUOTA_CYCLE_MS + 50);
+  const afterServerSync = reconcileQuotaState(clientBootAtPtMidnight, { validKeyCount: 10, exhaustedKeyCount: 0 }, exactPtMidnight + 50);
   assert.equal(afterServerSync.remaining, 200);
-  const after13Keys = reconcileQuotaState(afterServerSync, { validKeyCount: 13, exhaustedKeyCount: 0 }, t0 + QUOTA_CYCLE_MS + 100);
+  const after13Keys = reconcileQuotaState(afterServerSync, { validKeyCount: 13, exhaustedKeyCount: 0 }, exactPtMidnight + 100);
   assert.equal(after13Keys.remaining, 260);
 });
 

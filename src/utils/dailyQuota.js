@@ -1,3 +1,10 @@
+import {
+  getNextPacificResetMs,
+  getPacificCycleStartMs,
+  getPacificDateKey,
+  isPacificCycleExpired
+} from './pacificTime.js';
+
 export const DAILY_QUOTA_PER_KEY = 20;
 export const PLUS_QUOTA_PER_KEY = 1000;
 export const QUOTA_CYCLE_MS = 24 * 60 * 60 * 1000;
@@ -18,20 +25,15 @@ function toPosInt(value, fallback = DAILY_QUOTA_PER_KEY) {
   return Math.floor(value);
 }
 
-export function isCycleExpired(cycleStartedAt, now = Date.now()) {
-  if (typeof cycleStartedAt !== 'number' || !Number.isFinite(cycleStartedAt) || cycleStartedAt <= 0) {
-    return true;
-  }
-  if (now < cycleStartedAt) {
-    return true;
-  }
-  return now - cycleStartedAt >= QUOTA_CYCLE_MS;
+export function isCycleExpired(cycleStartedAt, now = Date.now(), ptDateKey = '') {
+  return isPacificCycleExpired(cycleStartedAt, ptDateKey, now);
 }
 
 export function createFreshQuotaState({
   validKeyCount = 0,
   exhaustedKeyCount = 0,
   quotaPerKey = DAILY_QUOTA_PER_KEY,
+  charsUsed = 0,
   now = Date.now()
 } = {}) {
   const safeKeyCount = toNonNegInt(validKeyCount, 0);
@@ -39,16 +41,21 @@ export function createFreshQuotaState({
   const safeExhausted = Math.min(safeKeyCount, toNonNegInt(exhaustedKeyCount, 0));
   const totalCapacity = safeKeyCount * safeQuotaPerKey;
   const maxRemaining = Math.max(0, (safeKeyCount - safeExhausted) * safeQuotaPerKey);
+  const cycleStartedAt = getPacificCycleStartMs(now);
+  const resetAt = getNextPacificResetMs(now);
+  const ptDateKey = getPacificDateKey(now);
 
   return {
-    cycleStartedAt: now,
-    resetAt: now + QUOTA_CYCLE_MS,
+    cycleStartedAt,
+    resetAt,
+    ptDateKey,
     validKeyCount: safeKeyCount,
     quotaPerKey: safeQuotaPerKey,
     exhaustedKeyCount: safeExhausted,
     totalCapacity,
     remaining: maxRemaining,
     usedCount: Math.max(0, totalCapacity - maxRemaining),
+    charsUsed: toNonNegInt(charsUsed, 0),
     updatedAt: now
   };
 }
@@ -64,7 +71,9 @@ export function reconcileQuotaState(savedState, serverMeta = {}, now = Date.now(
     ? toNonNegInt(serverMeta.validKeyCount, 0)
     : toNonNegInt(savedState?.validKeyCount, 0);
   const hasServerExhausted = hasServerMeta && typeof serverMeta.exhaustedKeyCount === 'number' && Number.isFinite(serverMeta.exhaustedKeyCount);
-  const expired = !savedState || typeof savedState !== 'object' || isCycleExpired(savedState.cycleStartedAt, now);
+  const expired = !savedState
+    || typeof savedState !== 'object'
+    || isCycleExpired(savedState.cycleStartedAt, now, savedState.ptDateKey || '');
 
   const exhaustedKeyCount = Math.min(
     validKeyCount,
@@ -78,6 +87,7 @@ export function reconcileQuotaState(savedState, serverMeta = {}, now = Date.now(
       validKeyCount,
       exhaustedKeyCount,
       quotaPerKey,
+      charsUsed: 0,
       now
     });
   }
@@ -88,16 +98,20 @@ export function reconcileQuotaState(savedState, serverMeta = {}, now = Date.now(
   const uncappedRemaining = Math.max(0, totalCapacity - priorUsed);
   const remaining = Math.min(uncappedRemaining, maxRemainingFromHealthy);
   const usedCount = Math.max(0, totalCapacity - remaining);
+  const ptCycleStart = getPacificCycleStartMs(now);
+  const nextResetAt = getNextPacificResetMs(now);
 
   return {
-    cycleStartedAt: savedState.cycleStartedAt,
-    resetAt: savedState.cycleStartedAt + QUOTA_CYCLE_MS,
+    cycleStartedAt: ptCycleStart,
+    resetAt: nextResetAt,
+    ptDateKey: savedState.ptDateKey || getPacificDateKey(now),
     validKeyCount,
     quotaPerKey,
     exhaustedKeyCount,
     totalCapacity,
     remaining,
     usedCount,
+    charsUsed: toNonNegInt(savedState.charsUsed, 0),
     updatedAt: now
   };
 }
@@ -110,10 +124,12 @@ export function applyMessageSendQuota(currentState, quotaMeta = {}, now = Date.n
 
   if (quotaMeta.succeeded === true) {
     const nextRemaining = Math.max(0, reconciled.remaining - 1);
+    const addedChars = toNonNegInt(quotaMeta.charsCount, 0);
     return {
       ...reconciled,
       remaining: nextRemaining,
       usedCount: Math.max(0, reconciled.totalCapacity - nextRemaining),
+      charsUsed: toNonNegInt(reconciled.charsUsed, 0) + addedChars,
       updatedAt: now
     };
   }

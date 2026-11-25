@@ -90,45 +90,58 @@ test('computes remaining global capacity out of 200 messages for Admin Panel', (
   assert.equal(noKeys.percentRemaining, 0);
 });
 
-test('computes independent capacity for Plus Plus (200) and Plus (10,000) without cross-deduction', () => {
+test('computes independent capacity and character counters for Plus Plus (200) and Plus (10,000) with PT midnight reset', () => {
   assert.equal(PLUS_PLUS_ADMIN_CAPACITY_TARGET, 200);
   assert.equal(PLUS_ADMIN_CAPACITY_TARGET, 10000);
 
-  const now = 1_700_000_050_000;
+  // 2026-11-24 12:00:00 PST (2026-11-24 20:00:00 UTC)
+  const ptMidnightStart = Date.UTC(2026, 10, 24, 8, 0, 0);
+  const midDayPt = Date.UTC(2026, 10, 24, 20, 0, 0);
   const summary = computeDualModelCapacitySummary({
     dailyQuota: { validKeyCount: 10, totalCapacity: 200, remaining: 200, exhaustedKeyCount: 0 },
     plusDailyQuota: { validKeyCount: 10, totalCapacity: 10000, remaining: 10000, exhaustedKeyCount: 0 },
     quotaAnalytics: {
-      cycleStartedAt: now - 10_000,
+      cycleStartedAt: ptMidnightStart,
+      ptDateKey: '2026-11-24',
       plusPlusUsed: 12,
-      plusUsed: 250
+      plusUsed: 250,
+      plusPlusChars: 4820,
+      plusChars: 61500
     },
-    now
+    now: midDayPt
   });
 
   assert.equal(summary.plusPlus.targetCapacity, 200);
   assert.equal(summary.plusPlus.remaining, 188);
   assert.equal(summary.plusPlus.used, 12);
+  assert.equal(summary.plusPlus.charsUsed, 4820);
   assert.equal(summary.plusPlus.percentRemaining, 94);
 
   assert.equal(summary.plus.targetCapacity, 10000);
   assert.equal(summary.plus.remaining, 9750);
   assert.equal(summary.plus.used, 250);
+  assert.equal(summary.plus.charsUsed, 61500);
   assert.equal(summary.plus.percentRemaining, 98);
 
-  // After 24h cycle expiration, both reset cleanly back to full capacity
+  // At 00:00:00 PST next PT day (2026-11-25 08:00:00 UTC), both message and char counters reset cleanly
+  const nextPtMidnight = Date.UTC(2026, 10, 25, 8, 0, 0);
   const expiredSummary = computeDualModelCapacitySummary({
     dailyQuota: { validKeyCount: 10, totalCapacity: 200, remaining: 200, exhaustedKeyCount: 0 },
     plusDailyQuota: { validKeyCount: 10, totalCapacity: 10000, remaining: 10000, exhaustedKeyCount: 0 },
     quotaAnalytics: {
-      cycleStartedAt: now - 86_400_000,
+      cycleStartedAt: ptMidnightStart,
+      ptDateKey: '2026-11-24',
       plusPlusUsed: 120,
-      plusUsed: 1400
+      plusUsed: 1400,
+      plusPlusChars: 25000,
+      plusChars: 310000
     },
-    now
+    now: nextPtMidnight
   });
   assert.equal(expiredSummary.plusPlus.remaining, 200);
+  assert.equal(expiredSummary.plusPlus.charsUsed, 0);
   assert.equal(expiredSummary.plus.remaining, 10000);
+  assert.equal(expiredSummary.plus.charsUsed, 0);
 });
 
 test('checks 24h cycle expiration and clamps admin edits safely', () => {

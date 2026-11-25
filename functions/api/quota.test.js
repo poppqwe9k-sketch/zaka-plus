@@ -35,9 +35,9 @@ test('GET /api/quota returns valid key count and 20 messages per key without exp
   assert.equal(body.models['plus-fast'].totalCapacity, 10000);
 });
 
-test('getServerQuotaSnapshot excludes invalid 401 keys, tracks 429 exhausted keys, and resets exhaustion after 24 hours', () => {
+test('getServerQuotaSnapshot excludes invalid 401 keys, tracks 429 exhausted keys, and resets exhaustion at 00:00 America/Los_Angeles', () => {
   resetKeyRotationForTests();
-  const t0 = 1_700_000_000_000;
+  const t0 = Date.UTC(2026, 10, 25, 7, 30, 0); // 2026-11-24 23:30:00 PST
   const env = {
     GEMINI_KEY_1: 'k-auth-bad',
     GEMINI_KEY_2: 'k-quota-bad',
@@ -56,8 +56,11 @@ test('getServerQuotaSnapshot excludes invalid 401 keys, tracks 429 exhausted key
   assert.equal(midCycle.healthyKeyCount, 2);
   assert.equal(midCycle.maxRemainingFromHealthyKeys, 40);
 
-  const after24h = getServerQuotaSnapshot(env, 'gemini-4-hydrogen', t0 + QUOTA_CYCLE_MS);
-  assert.equal(after24h.exhaustedKeyCount, 0);
-  assert.equal(after24h.healthyKeyCount, 3);
-  assert.equal(after24h.maxRemainingFromHealthyKeys, 60);
+  // At 2026-11-25 08:00:00 UTC === 00:00:00 PST (11:00 AM Baghdad): 429 exhaustion resets
+  const atPtMidnight = Date.UTC(2026, 10, 25, 8, 0, 0);
+  const afterPtMidnight = getServerQuotaSnapshot(env, 'gemini-4-hydrogen', atPtMidnight);
+  assert.equal(afterPtMidnight.exhaustedKeyCount, 0);
+  assert.equal(afterPtMidnight.healthyKeyCount, 3);
+  assert.equal(afterPtMidnight.maxRemainingFromHealthyKeys, 60);
+  assert.equal(afterPtMidnight.ptDateKey, '2026-11-25');
 });

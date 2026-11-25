@@ -6,15 +6,24 @@ import AdminPanelModal from './AdminPanelModal.jsx';
 import AuthModal from './AuthModal.jsx';
 import { getTranslation } from '../i18n/translations.js';
 
-test('AdminPanelModal renders independent Plus Plus (200) and Plus (10,000) capacity cards with separate progress bars and shared Refresh', () => {
+test('AdminPanelModal renders independent Plus Plus (200) and Plus (10,000) capacity cards with separate progress bars and shared Refresh', async () => {
   const t = getTranslation('ar');
+  const now = Date.now();
+  const { getPacificCycleStartMs, getPacificDateKey } = await import('../utils/pacificTime.js');
   const html = renderToStaticMarkup(
     <AdminPanelModal
       open={true}
       onClose={() => {}}
       dailyQuota={{ validKeyCount: 10, totalCapacity: 200, remaining: 185, usedCount: 15 }}
       plusDailyQuota={{ validKeyCount: 10, totalCapacity: 10000, remaining: 9940, usedCount: 60 }}
-      quotaAnalytics={{ cycleStartedAt: Date.now() - 1000, plusPlusUsed: 15, plusUsed: 60 }}
+      quotaAnalytics={{
+        cycleStartedAt: getPacificCycleStartMs(now),
+        ptDateKey: getPacificDateKey(now),
+        plusPlusUsed: 15,
+        plusUsed: 60,
+        plusPlusChars: 3450,
+        plusChars: 18920
+      }}
       onRefreshQuota={() => {}}
       onRefreshDashboard={async () => {}}
       usersList={[
@@ -50,12 +59,20 @@ test('AdminPanelModal renders independent Plus Plus (200) and Plus (10,000) capa
 
   assert.match(html, /لوحة تحكم المسؤول/);
   assert.doesNotMatch(html, /السعة الكلية المتبقية \(من أصل 200 رسالة\)/);
-  assert.match(html, /نموذج بلس بلاس \(جيمناي 4 هيدروجين\)/);
+  assert.doesNotMatch(html, /جيمناي 4 هيدروجين/);
+  assert.doesNotMatch(html, /Gemini 4 Hydrogen/);
+  assert.match(html, /نموذج بلس بلاس \(gemini-4-hydrogen\)/);
   assert.match(html, /185/);
   assert.match(html, /\/ 200/);
+  assert.match(html, /3,450/);
   assert.match(html, /نموذج بلس \(gemini-3\.5-flash-lite\)/);
   assert.match(html, /9,940/);
   assert.match(html, /\/ 10,000/);
+  assert.match(html, /18,920/);
+  assert.match(html, /data-testid="admin-chars-plus-plus"/);
+  assert.match(html, /data-testid="admin-chars-plus"/);
+  assert.match(html, /data-testid="admin-reset-countdown-plus-plus"/);
+  assert.match(html, /data-testid="admin-reset-countdown-plus"/);
   assert.match(html, /data-testid="admin-progress-plus-plus"/);
   assert.match(html, /data-testid="admin-progress-plus"/);
   assert.match(html, /data-testid="admin-refresh-button"/);

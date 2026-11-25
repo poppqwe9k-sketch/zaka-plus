@@ -1,4 +1,10 @@
 import { GoogleGenAI } from '@google/genai';
+import {
+  getNextPacificResetMs,
+  getPacificCycleStartMs,
+  getPacificDateKey,
+  isPacificCycleExpired
+} from '../../src/utils/pacificTime.js';
 
 export const GEMINI_KEY_COUNT = 19;
 export const DAILY_QUOTA_PER_KEY = 20;
@@ -181,7 +187,7 @@ function getModelExhaustedMap(model = 'gemini-4-hydrogen', now = Date.now()) {
     QUOTA_EXHAUSTED_KEYS_BY_MODEL.set(targetModel, map);
   }
   for (const [key, exhaustedAt] of map.entries()) {
-    if (now - exhaustedAt >= QUOTA_CYCLE_MS) {
+    if (isPacificCycleExpired(exhaustedAt, '', now)) {
       map.delete(key);
     }
   }
@@ -256,7 +262,10 @@ export function getServerQuotaSnapshot(
     quotaPerKey: safeQuotaPerKey,
     totalCapacity,
     maxRemainingFromHealthyKeys,
-    cycleDurationMs: QUOTA_CYCLE_MS
+    cycleDurationMs: QUOTA_CYCLE_MS,
+    cycleStartedAt: getPacificCycleStartMs(now),
+    nextResetAt: getNextPacificResetMs(now),
+    ptDateKey: getPacificDateKey(now)
   };
 }
 

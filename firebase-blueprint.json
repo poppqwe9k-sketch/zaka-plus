@@ -174,12 +174,18 @@
     },
     "ModelQuotaAnalytics": {
       "title": "ModelQuotaAnalytics",
-      "description": "Global per-model daily usage counters over a rolling 24-hour cycle (Plus Plus out of 200, Plus out of 10000).",
+      "description": "Global per-model daily usage and character counters reset at 00:00 America/Los_Angeles (Plus Plus out of 200, Plus out of 10000).",
       "type": "object",
       "properties": {
         "cycleStartedAt": {
           "type": "integer",
-          "description": "Epoch millisecond timestamp when the current 24h global capacity cycle started."
+          "description": "Epoch millisecond timestamp of 00:00 America/Los_Angeles for the active daily quota cycle."
+        },
+        "ptDateKey": {
+          "type": "string",
+          "description": "Pacific Time YYYY-MM-DD date key (America/Los_Angeles) matching Google AI Studio daily reset.",
+          "minLength": 8,
+          "maxLength": 16
         },
         "plusPlusUsed": {
           "type": "integer",
@@ -189,6 +195,14 @@
           "type": "integer",
           "description": "Cumulative messages consumed today on Plus (gemini-3.5-flash-lite) out of 10000."
         },
+        "plusPlusChars": {
+          "type": "integer",
+          "description": "Cumulative prompt + AI response characters consumed today on gemini-4-hydrogen."
+        },
+        "plusChars": {
+          "type": "integer",
+          "description": "Cumulative prompt + AI response characters consumed today on gemini-3.5-flash-lite."
+        },
         "updatedAt": {
           "type": "string",
           "format": "date-time",
@@ -197,8 +211,11 @@
       },
       "required": [
         "cycleStartedAt",
+        "ptDateKey",
         "plusPlusUsed",
         "plusUsed",
+        "plusPlusChars",
+        "plusChars",
         "updatedAt"
       ]
     }

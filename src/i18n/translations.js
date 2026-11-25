@@ -74,7 +74,7 @@ export const TRANSLATIONS = {
     modelLabel: 'النموذج',
     modelsButtonLabel: 'النماذج',
     modelProName: 'بلس بلاس',
-    modelProSubtitle: 'جيمناي 4 هيدروجين',
+    modelProSubtitle: 'gemini-4-hydrogen',
     modelProDesc: 'النموذج الفائق للتحليل العميق والمهام المعقدة (3 محاولات يومياً مجاناً، ثم ينتقل تلقائياً إلى بلس).',
     modelFastName: 'بلس',
     modelFastSubtitle: 'gemini-3.5-flash-lite',
@@ -126,7 +126,7 @@ export const TRANSLATIONS = {
     creditsExhaustedDevNote: 'التطبيق قيد التطوير',
     creditsExhaustedDesc: 'نموذج بلس المجاني متاح دائماً بلا حدود، ويتجدد رصيد بلس بلاس (3 محاولات) كل 24 ساعة.',
     creditsSection: 'الرصيد اليومي',
-    creditsSettingsTitle: 'رصيد بلس بلاس اليومي (جيمناي 4 هيدروجين)',
+    creditsSettingsTitle: 'رصيد بلس بلاس اليومي (gemini-4-hydrogen)',
     creditsSettingsDesc: 'يبدأ كل مستخدم بـ 3 محاولات يومياً لنموذج بلس بلاس تتجدد كل 24 ساعة، وبعدها ينتقل التطبيق تلقائياً إلى نموذج بلس المفتوح بلا حدود.',
     voiceStart: 'إملاء صوتي',
     voiceStop: 'إيقاف الإملاء الصوتي',
@@ -170,13 +170,17 @@ export const TRANSLATIONS = {
     adminPanelButton: 'لوحة المسؤول',
     adminPanelTitle: 'لوحة تحكم المسؤول',
     adminGlobalCapacityTitle: 'السعة اليومية المتبقية حسب النموذج',
-    adminModelPlusPlusTitle: 'نموذج بلس بلاس (جيمناي 4 هيدروجين)',
+    adminModelPlusPlusTitle: 'نموذج بلس بلاس (gemini-4-hydrogen)',
     adminModelPlusTitle: 'نموذج بلس (gemini-3.5-flash-lite)',
     adminRefreshButton: 'تحديث',
     adminRefreshingLabel: 'جاري التحديث...',
     adminRefreshedNotice: 'تم التحديث',
     adminActiveKeysLabel: 'مفاتيح نشطة',
-    adminRenews24h: 'تتجدد كل 24 ساعة',
+    adminRenews24h: 'يتجدد 00:00 بتوقيت جوجل (PT)',
+    adminCharsUsedTodayLabel: 'إجمالي الحروف المستهلكة اليوم',
+    adminCharsUnit: 'حرف',
+    adminResetCountdownLabel: 'التصفير التلقائي خلال',
+    adminResetBaghdadSuffix: 'بتوقيت جوجل (بغداد)',
     adminNoKeysActive: 'لم يتم اكتشاف مفاتيح API نشطة حالياً',
     adminVisitsSectionTitle: 'المشاهدات والزيارات',
     adminVisitsLiveLabel: 'تحديث مباشر',
@@ -238,14 +242,14 @@ export const TRANSLATIONS = {
     modelLabel: 'Model',
     modelsButtonLabel: 'Models',
     modelProName: 'Plus Plus',
-    modelProSubtitle: 'Gemini 4 Hydrogen',
+    modelProSubtitle: 'gemini-4-hydrogen',
     modelProDesc: 'Super model for deep analysis and complex tasks (3 free daily tries, then switches to Plus).',
     modelFastName: 'Plus',
     modelFastSubtitle: 'gemini-3.5-flash-lite',
     modelFastDesc: 'Open fast model, free and unlimited for daily questions.',
     renameChatLabel: 'Rename chat',
     saveRenameLabel: 'Save title',
-    sourcesHeading: 'Search Sources',
+    sourcesHeading: 'Sources',
     placeholder: 'Type your message here...',
     imagePlaceholder: 'Describe the image you want to create...',
     offlinePlaceholder: 'You are offline — browse saved conversations',
@@ -290,7 +294,7 @@ export const TRANSLATIONS = {
     creditsExhaustedDevNote: 'The app is under development',
     creditsExhaustedDesc: 'Free Plus remains unlimited and always available; Plus Plus (3 daily tries) resets every 24 hours.',
     creditsSection: 'Daily Balance',
-    creditsSettingsTitle: 'Plus Plus daily tries (Gemini 4 Hydrogen)',
+    creditsSettingsTitle: 'Plus Plus daily tries (gemini-4-hydrogen)',
     creditsSettingsDesc: 'Each user starts with 3 daily Plus Plus tries every 24 hours, then automatically switches to unlimited free Plus.',
     voiceStart: 'Voice input',
     voiceStop: 'Stop voice input',
@@ -334,13 +338,17 @@ export const TRANSLATIONS = {
     adminPanelButton: 'Admin Panel',
     adminPanelTitle: 'Admin Control Panel',
     adminGlobalCapacityTitle: 'Daily Capacity Remaining by Model',
-    adminModelPlusPlusTitle: 'Plus Plus Model (Gemini 4 Hydrogen)',
+    adminModelPlusPlusTitle: 'Plus Plus Model (gemini-4-hydrogen)',
     adminModelPlusTitle: 'Plus Model (gemini-3.5-flash-lite)',
     adminRefreshButton: 'Refresh',
     adminRefreshingLabel: 'Refreshing...',
     adminRefreshedNotice: 'Refreshed',
     adminActiveKeysLabel: 'active keys',
-    adminRenews24h: 'resets every 24h',
+    adminRenews24h: 'resets at 00:00 Google PT',
+    adminCharsUsedTodayLabel: 'Total characters used today',
+    adminCharsUnit: 'chars',
+    adminResetCountdownLabel: 'Auto-resets in',
+    adminResetBaghdadSuffix: 'Google PT (Baghdad)',
     adminNoKeysActive: 'No active API keys detected yet',
     adminVisitsSectionTitle: 'Views & Visits',
     adminVisitsLiveLabel: 'Live updates',
@@ -420,7 +428,7 @@ export const TRANSLATIONS = {
     languageDesc: 'Choisissez parmi 40 langues mondiales',
     darkModeLabel: 'Mode sombre',
     darkModeDesc: 'Confort visuel en faible luminosité',
-    modelSection: 'Niveaux IA (Gemini 4 Hydrogen)',
+    modelSection: 'Niveaux IA (gemini-4-hydrogen)',
     defaultModelLabel: 'Niveau par défaut',
     systemInstructionLabel: 'Instruction système (optionnel)',
     systemInstructionDesc: 'Orienter le style de réponse de l’assistant',
@@ -440,7 +448,7 @@ export const TRANSLATIONS = {
     tiers: {
       plus: { label: 'Plus', desc: 'Rapide et léger pour les tâches quotidiennes' },
       'plus-plus': { label: 'Plus Plus', desc: 'Équilibré pour l’analyse et les tâches avancées' },
-      'plus-max': { label: 'Plus Max', desc: 'Intelligence maximale avec Gemini 4 Hydrogen' }
+      'plus-max': { label: 'Plus Max', desc: 'Intelligence maximale avec gemini-4-hydrogen' }
     }
   },
   es: {
@@ -483,7 +491,7 @@ export const TRANSLATIONS = {
     languageDesc: 'Elige entre 40 idiomas del mundo',
     darkModeLabel: 'Modo oscuro',
     darkModeDesc: 'Menor brillo en entornos con poca luz',
-    modelSection: 'Niveles de IA (Gemini 4 Hydrogen)',
+    modelSection: 'Niveles de IA (gemini-4-hydrogen)',
     defaultModelLabel: 'Nivel predeterminado',
     systemInstructionLabel: 'Instrucción del sistema (opcional)',
     systemInstructionDesc: 'Guía el estilo de las respuestas',
@@ -503,7 +511,7 @@ export const TRANSLATIONS = {
     tiers: {
       plus: { label: 'Plus', desc: 'Rápido y ligero para tareas diarias' },
       'plus-plus': { label: 'Plus Plus', desc: 'Equilibrado para análisis y tareas avanzadas' },
-      'plus-max': { label: 'Plus Max', desc: 'Máxima capacidad con Gemini 4 Hydrogen' }
+      'plus-max': { label: 'Plus Max', desc: 'Máxima capacidad con gemini-4-hydrogen' }
     }
   },
   de: {
@@ -546,7 +554,7 @@ export const TRANSLATIONS = {
     languageDesc: 'Wähle aus 40 Weltsprachen',
     darkModeLabel: 'Dunkelmodus',
     darkModeDesc: 'Angenehm bei wenig Licht',
-    modelSection: 'KI-Stufen (Gemini 4 Hydrogen)',
+    modelSection: 'KI-Stufen (gemini-4-hydrogen)',
     defaultModelLabel: 'Standardstufe',
     systemInstructionLabel: 'Systemanweisung (optional)',
     systemInstructionDesc: 'Antwortstil des Assistenten steuern',
@@ -566,7 +574,7 @@ export const TRANSLATIONS = {
     tiers: {
       plus: { label: 'Plus', desc: 'Schnell und leicht für den Alltag' },
       'plus-plus': { label: 'Plus Plus', desc: 'Ausgewogen für Analysen' },
-      'plus-max': { label: 'Plus Max', desc: 'Maximale Intelligenz mit Gemini 4 Hydrogen' }
+      'plus-max': { label: 'Plus Max', desc: 'Maximale Intelligenz mit gemini-4-hydrogen' }
     }
   },
   tr: {
@@ -609,7 +617,7 @@ export const TRANSLATIONS = {
     languageDesc: '40 dünya dilinden birini seçin',
     darkModeLabel: 'Karanlık mod',
     darkModeDesc: 'Düşük ışıkta göz konforu',
-    modelSection: 'Yapay Zekâ Seviyeleri (Gemini 4 Hydrogen)',
+    modelSection: 'Yapay Zekâ Seviyeleri (gemini-4-hydrogen)',
     defaultModelLabel: 'Varsayılan seviye',
     systemInstructionLabel: 'Sistem yönergesi (isteğe bağlı)',
     systemInstructionDesc: 'Asistanın yanıt tarzını yönlendirin',
@@ -626,7 +634,7 @@ export const TRANSLATIONS = {
     tiers: {
       plus: { label: 'Plus', desc: 'Günlük görevler için hızlı ve hafif' },
       'plus-plus': { label: 'Plus Plus', desc: 'Analiz ve gelişmiş görevler için dengeli' },
-      'plus-max': { label: 'Plus Max', desc: 'Gemini 4 Hydrogen ile en yüksek zekâ' }
+      'plus-max': { label: 'Plus Max', desc: 'gemini-4-hydrogen ile en yüksek zekâ' }
     }
   },
   fa: {
@@ -669,7 +677,7 @@ export const TRANSLATIONS = {
     languageDesc: 'انتخاب از میان ۴۰ زبان دنیا',
     darkModeLabel: 'حالت تیره',
     darkModeDesc: 'مناسب برای نور کم',
-    modelSection: 'سطوح هوش مصنوعی (Gemini 4 Hydrogen)',
+    modelSection: 'سطوح هوش مصنوعی (gemini-4-hydrogen)',
     defaultModelLabel: 'سطح پیش‌فرض',
     systemInstructionLabel: 'دستورالعمل سیستم (اختیاری)',
     systemInstructionDesc: 'هدایت سبک پاسخ‌گویی دستیار',
@@ -686,7 +694,7 @@ export const TRANSLATIONS = {
     tiers: {
       plus: { label: 'پلاس', desc: 'سریع و سبک برای کارهای روزمره' },
       'plus-plus': { label: 'پلاس پلاس', desc: 'متعادل برای تحلیل و کارهای پیشرفته' },
-      'plus-max': { label: 'پلاس مکس', desc: 'قوی‌ترین سطح با نهایت توان Gemini 4 Hydrogen' }
+      'plus-max': { label: 'پلاس مکس', desc: 'قوی‌ترین سطح با نهایت توان gemini-4-hydrogen' }
     }
   },
   ur: {
@@ -729,7 +737,7 @@ export const TRANSLATIONS = {
     languageDesc: '۴۰ عالمی زبانوں میں سے منتخب کریں',
     darkModeLabel: 'ڈارک موڈ',
     darkModeDesc: 'کم روشنی میں آنکھوں کے لیے آرام دہ',
-    modelSection: 'AI درجات (Gemini 4 Hydrogen)',
+    modelSection: 'AI درجات (gemini-4-hydrogen)',
     defaultModelLabel: 'بنیادی درجہ',
     systemInstructionLabel: 'سسٹم ہدایات (اختیاری)',
     systemInstructionDesc: 'جوابات کے انداز کی رہنمائی کریں',
@@ -746,7 +754,7 @@ export const TRANSLATIONS = {
     tiers: {
       plus: { label: 'پلس', desc: 'روزمرہ کاموں کے لیے تیز اور ہلکا' },
       'plus-plus': { label: 'پلس پلس', desc: 'تجزیہ اور جدید کاموں کے لیے متوازن' },
-      'plus-max': { label: 'پلس میکس', desc: 'Gemini 4 Hydrogen کی مکمل صلاحیت کے ساتھ طاقتور ترین' }
+      'plus-max': { label: 'پلس میکس', desc: 'gemini-4-hydrogen کی مکمل صلاحیت کے ساتھ طاقتور ترین' }
     }
   },
   he: {
@@ -789,7 +797,7 @@ export const TRANSLATIONS = {
     languageDesc: 'בחירה מתוך 40 שפות',
     darkModeLabel: 'מצב כהה',
     darkModeDesc: 'נוח לעיניים בתאורה חלשה',
-    modelSection: 'רמות AI (Gemini 4 Hydrogen)',
+    modelSection: 'רמות AI (gemini-4-hydrogen)',
     defaultModelLabel: 'רמת ברירת מחדל',
     systemInstructionLabel: 'הנחיית מערכת (אופציונלי)',
     systemInstructionDesc: 'הכוונת סגנון התשובות',
@@ -806,7 +814,7 @@ export const TRANSLATIONS = {
     tiers: {
       plus: { label: 'Plus', desc: 'מהיר וקל למשימות יומיומיות' },
       'plus-plus': { label: 'Plus Plus', desc: 'מאוזן לניתוח ומשימות מתקדמות' },
-      'plus-max': { label: 'Plus Max', desc: 'העומק והבינה הגבוהים ביותר עם Gemini 4 Hydrogen' }
+      'plus-max': { label: 'Plus Max', desc: 'העומק והבינה הגבוהים ביותר עם gemini-4-hydrogen' }
     }
   },
   ru: {
@@ -849,7 +857,7 @@ export const TRANSLATIONS = {
     languageDesc: 'Выберите один из 40 языков',
     darkModeLabel: 'Тёмная тема',
     darkModeDesc: 'Комфортно при слабом освещении',
-    modelSection: 'Уровни ИИ (Gemini 4 Hydrogen)',
+    modelSection: 'Уровни ИИ (gemini-4-hydrogen)',
     defaultModelLabel: 'Уровень по умолчанию',
     systemInstructionLabel: 'Системная инструкция',
     systemInstructionDesc: 'Настройка стиля ответов',
@@ -866,7 +874,7 @@ export const TRANSLATIONS = {
     tiers: {
       plus: { label: 'Plus', desc: 'Быстрый и лёгкий для повседневных задач' },
       'plus-plus': { label: 'Plus Plus', desc: 'Сбалансированный для анализа' },
-      'plus-max': { label: 'Plus Max', desc: 'Максимум возможностей Gemini 4 Hydrogen' }
+      'plus-max': { label: 'Plus Max', desc: 'Максимум возможностей gemini-4-hydrogen' }
     }
   },
   zh: {
@@ -909,7 +917,7 @@ export const TRANSLATIONS = {
     languageDesc: '支持 40 种常用语言',
     darkModeLabel: '深色模式',
     darkModeDesc: '适合弱光环境的护眼外观',
-    modelSection: 'AI 级别 (Gemini 4 Hydrogen)',
+    modelSection: 'AI 级别 (gemini-4-hydrogen)',
     defaultModelLabel: '默认级别',
     systemInstructionLabel: '系统指令（可选）',
     systemInstructionDesc: '引导助手的回复风格',
@@ -926,7 +934,7 @@ export const TRANSLATIONS = {
     tiers: {
       plus: { label: 'Plus', desc: '快速轻量，适合日常任务' },
       'plus-plus': { label: 'Plus Plus', desc: '均衡分析，适合进阶任务' },
-      'plus-max': { label: 'Plus Max', desc: '释放 Gemini 4 Hydrogen 最强推理能力' }
+      'plus-max': { label: 'Plus Max', desc: '释放 gemini-4-hydrogen 最强推理能力' }
     }
   },
   ja: {
@@ -969,7 +977,7 @@ export const TRANSLATIONS = {
     languageDesc: '世界の40言語から選択',
     darkModeLabel: 'ダークモード',
     darkModeDesc: '暗い場所でも目に優しい表示',
-    modelSection: 'AI レベル (Gemini 4 Hydrogen)',
+    modelSection: 'AI レベル (gemini-4-hydrogen)',
     defaultModelLabel: '既定のレベル',
     systemInstructionLabel: 'システム指示（任意）',
     systemInstructionDesc: '回答スタイルを指定します',
@@ -986,7 +994,7 @@ export const TRANSLATIONS = {
     tiers: {
       plus: { label: 'Plus', desc: '日常タスク向けの高速・軽量モデル' },
       'plus-plus': { label: 'Plus Plus', desc: '分析や高度な作業向けのバランス型' },
-      'plus-max': { label: 'Plus Max', desc: 'Gemini 4 Hydrogen 最大の知能と深い推論' }
+      'plus-max': { label: 'Plus Max', desc: 'gemini-4-hydrogen 最大の知能と深い推論' }
     }
   },
   ko: {
@@ -1029,7 +1037,7 @@ export const TRANSLATIONS = {
     languageDesc: '40개 세계 언어 중 선택',
     darkModeLabel: '다크 모드',
     darkModeDesc: '어두운 환경에서 눈의 피로 감소',
-    modelSection: 'AI 등급 (Gemini 4 Hydrogen)',
+    modelSection: 'AI 등급 (gemini-4-hydrogen)',
     defaultModelLabel: '기본 등급',
     systemInstructionLabel: '시스템 지침 (선택 사항)',
     systemInstructionDesc: '어시스턴트의 응답 방식을 지정합니다',
@@ -1046,7 +1054,7 @@ export const TRANSLATIONS = {
     tiers: {
       plus: { label: 'Plus', desc: '일상 작업을 위한 빠르고 가벼운 모델' },
       'plus-plus': { label: 'Plus Plus', desc: '분석과 고급 작업을 위한 균형 잡힌 모델' },
-      'plus-max': { label: 'Plus Max', desc: 'Gemini 4 Hydrogen 기반 최고 수준의 추론' }
+      'plus-max': { label: 'Plus Max', desc: 'gemini-4-hydrogen 기반 최고 수준의 추론' }
     }
   },
   hi: {
@@ -1089,7 +1097,7 @@ export const TRANSLATIONS = {
     languageDesc: '40 विश्व भाषाओं में से चुनें',
     darkModeLabel: 'डार्क मोड',
     darkModeDesc: 'कम रोशनी में आरामदायक दृश्य',
-    modelSection: 'AI स्तर (Gemini 4 Hydrogen)',
+    modelSection: 'AI स्तर (gemini-4-hydrogen)',
     defaultModelLabel: 'डिफ़ॉल्ट स्तर',
     systemInstructionLabel: 'सिस्टम निर्देश (वैकल्पिक)',
     systemInstructionDesc: 'सहायक के उत्तर देने का तरीका तय करें',
@@ -1106,7 +1114,7 @@ export const TRANSLATIONS = {
     tiers: {
       plus: { label: 'Plus', desc: 'दैनिक कार्यों के लिए तेज़ और हल्का' },
       'plus-plus': { label: 'Plus Plus', desc: 'विश्लेषण के लिए संतुलित स्तर' },
-      'plus-max': { label: 'Plus Max', desc: 'Gemini 4 Hydrogen की सर्वोच्च क्षमता' }
+      'plus-max': { label: 'Plus Max', desc: 'gemini-4-hydrogen की सर्वोच्च क्षमता' }
     }
   }
 };
@@ -1129,11 +1137,11 @@ const EXTRA_LOCALES = {
     offlineSendError: 'Sei offline. Riconnettiti per inviare nuovi messaggi.',
     settingsTitle: 'Impostazioni', appearanceSection: 'Aspetto e lingua', languageLabel: 'Lingua',
     languageDesc: 'Scegli tra 40 lingue del mondo', darkModeLabel: 'Modalità scura', darkModeDesc: 'Meno affaticamento visivo',
-    modelSection: 'Livelli IA (Gemini 4 Hydrogen)', defaultModelLabel: 'Livello predefinito',
+    modelSection: 'Livelli IA (gemini-4-hydrogen)', defaultModelLabel: 'Livello predefinito',
     systemInstructionLabel: 'Istruzioni di sistema', systemInstructionDesc: 'Guida lo stile delle risposte',
     dataSection: 'Archiviazione locale offline', clearHistoryLabel: 'Cancella tutte le chat',
     clearHistoryDesc: 'Elimina la cronologia locale del browser', clearHistoryButton: 'Cancella cronologia', versionLabel: 'Versione',
-    tiers: { plus: { label: 'Plus', desc: 'Veloce e leggero per tutti i giorni' }, 'plus-plus': { label: 'Plus Plus', desc: 'Equilibrato per analisi avanzate' }, 'plus-max': { label: 'Plus Max', desc: 'Massima intelligenza con Gemini 4 Hydrogen' } }
+    tiers: { plus: { label: 'Plus', desc: 'Veloce e leggero per tutti i giorni' }, 'plus-plus': { label: 'Plus Plus', desc: 'Equilibrato per analisi avanzate' }, 'plus-max': { label: 'Plus Max', desc: 'Massima intelligenza con gemini-4-hydrogen' } }
   },
   pt: {
     newChat: 'Nova conversa', history: 'Conversas salvas', emptyHistory: 'Nenhuma conversa salva',
@@ -1150,11 +1158,11 @@ const EXTRA_LOCALES = {
     offlineSendError: 'Você está offline. Conecte-se para enviar novas mensagens.',
     settingsTitle: 'Configurações', appearanceSection: 'Aparência e idioma', languageLabel: 'Idioma',
     languageDesc: 'Escolha entre 40 idiomas', darkModeLabel: 'Modo escuro', darkModeDesc: 'Conforto em pouca luz',
-    modelSection: 'Níveis de IA (Gemini 4 Hydrogen)', defaultModelLabel: 'Nível padrão',
+    modelSection: 'Níveis de IA (gemini-4-hydrogen)', defaultModelLabel: 'Nível padrão',
     systemInstructionLabel: 'Instrução do sistema', systemInstructionDesc: 'Orienta o estilo das respostas',
     dataSection: 'Armazenamento local offline', clearHistoryLabel: 'Limpar todas as conversas',
     clearHistoryDesc: 'Excluir histórico local do navegador', clearHistoryButton: 'Limpar histórico', versionLabel: 'Versão',
-    tiers: { plus: { label: 'Plus', desc: 'Rápido e leve para o dia a dia' }, 'plus-plus': { label: 'Plus Plus', desc: 'Equilibrado para análises' }, 'plus-max': { label: 'Plus Max', desc: 'Máxima inteligência com Gemini 4 Hydrogen' } }
+    tiers: { plus: { label: 'Plus', desc: 'Rápido e leve para o dia a dia' }, 'plus-plus': { label: 'Plus Plus', desc: 'Equilibrado para análises' }, 'plus-max': { label: 'Plus Max', desc: 'Máxima inteligência com gemini-4-hydrogen' } }
   },
   nl: {
     newChat: 'Nieuw gesprek', history: 'Opgeslagen gesprekken', emptyHistory: 'Nog geen gesprekken',
@@ -1171,11 +1179,11 @@ const EXTRA_LOCALES = {
     offlineSendError: 'Je bent offline. Maak verbinding om berichten te verzenden.',
     settingsTitle: 'Instellingen', appearanceSection: 'Uiterlijk & Taal', languageLabel: 'Taal',
     languageDesc: 'Kies uit 40 talen', darkModeLabel: 'Donkere modus', darkModeDesc: 'Fijn bij weinig licht',
-    modelSection: 'AI-niveaus (Gemini 4 Hydrogen)', defaultModelLabel: 'Standaardniveau',
+    modelSection: 'AI-niveaus (gemini-4-hydrogen)', defaultModelLabel: 'Standaardniveau',
     systemInstructionLabel: 'Systeeminstructie', systemInstructionDesc: 'Stuur de antwoordstijl',
     dataSection: 'Lokale offline opslag', clearHistoryLabel: 'Alle gesprekken wissen',
     clearHistoryDesc: 'Lokale geschiedenis verwijderen', clearHistoryButton: 'Geschiedenis wissen', versionLabel: 'Versie',
-    tiers: { plus: { label: 'Plus', desc: 'Snel en licht voor dagelijks gebruik' }, 'plus-plus': { label: 'Plus Plus', desc: 'Gebalanceerd voor analyse' }, 'plus-max': { label: 'Plus Max', desc: 'Maximale kracht van Gemini 4 Hydrogen' } }
+    tiers: { plus: { label: 'Plus', desc: 'Snel en licht voor dagelijks gebruik' }, 'plus-plus': { label: 'Plus Plus', desc: 'Gebalanceerd voor analyse' }, 'plus-max': { label: 'Plus Max', desc: 'Maximale kracht van gemini-4-hydrogen' } }
   },
   pl: {
     newChat: 'Nowy czat', history: 'Zapisane rozmowy', emptyHistory: 'Brak zapisanych rozmów',
@@ -1192,11 +1200,11 @@ const EXTRA_LOCALES = {
     offlineSendError: 'Jesteś offline. Połącz się z siecią, aby wysłać wiadomość.',
     settingsTitle: 'Ustawienia', appearanceSection: 'Wygląd i język', languageLabel: 'Język',
     languageDesc: 'Wybierz spośród 40 języków', darkModeLabel: 'Tryb ciemny', darkModeDesc: 'Komfort w słabym świetle',
-    modelSection: 'Poziomy AI (Gemini 4 Hydrogen)', defaultModelLabel: 'Domyślny poziom',
+    modelSection: 'Poziomy AI (gemini-4-hydrogen)', defaultModelLabel: 'Domyślny poziom',
     systemInstructionLabel: 'Instrukcja systemowa', systemInstructionDesc: 'Określ styl odpowiedzi',
     dataSection: 'Pamięć lokalna offline', clearHistoryLabel: 'Wyczyść wszystkie rozmowy',
     clearHistoryDesc: 'Usuń historię zapisaną w przeglądarce', clearHistoryButton: 'Wyczyść historię', versionLabel: 'Wersja',
-    tiers: { plus: { label: 'Plus', desc: 'Szybki i lekki na co dzień' }, 'plus-plus': { label: 'Plus Plus', desc: 'Zrównoważony do analiz' }, 'plus-max': { label: 'Plus Max', desc: 'Maksymalne możliwości Gemini 4 Hydrogen' } }
+    tiers: { plus: { label: 'Plus', desc: 'Szybki i lekki na co dzień' }, 'plus-plus': { label: 'Plus Plus', desc: 'Zrównoważony do analiz' }, 'plus-max': { label: 'Plus Max', desc: 'Maksymalne możliwości gemini-4-hydrogen' } }
   },
   uk: {
     newChat: 'Новий чат', history: 'Збережені чати', emptyHistory: 'Ще немає збережених чатів',
@@ -1213,11 +1221,11 @@ const EXTRA_LOCALES = {
     offlineSendError: 'Немає інтернету. Підключіться, щоб надіслати повідомлення.',
     settingsTitle: 'Налаштування', appearanceSection: 'Вигляд і мова', languageLabel: 'Мова',
     languageDesc: 'Оберіть із 40 мов світу', darkModeLabel: 'Темна тема', darkModeDesc: 'Зручно при слабкому світлі',
-    modelSection: 'Рівні ШІ (Gemini 4 Hydrogen)', defaultModelLabel: 'Рівень за замовчуванням',
+    modelSection: 'Рівні ШІ (gemini-4-hydrogen)', defaultModelLabel: 'Рівень за замовчуванням',
     systemInstructionLabel: 'Системна інструкція', systemInstructionDesc: 'Стиль відповідей асистента',
     dataSection: 'Локальне сховище', clearHistoryLabel: 'Очистити всі чати',
     clearHistoryDesc: 'Видалити локальну історію браузера', clearHistoryButton: 'Очистити', versionLabel: 'Версія',
-    tiers: { plus: { label: 'Plus', desc: 'Швидкий і легкий для щоденних задач' }, 'plus-plus': { label: 'Plus Plus', desc: 'Збалансований для аналізу' }, 'plus-max': { label: 'Plus Max', desc: 'Найвища потужність Gemini 4 Hydrogen' } }
+    tiers: { plus: { label: 'Plus', desc: 'Швидкий і легкий для щоденних задач' }, 'plus-plus': { label: 'Plus Plus', desc: 'Збалансований для аналізу' }, 'plus-max': { label: 'Plus Max', desc: 'Найвища потужність gemini-4-hydrogen' } }
   },
   sv: {
     newChat: 'Ny chatt', history: 'Sparade chattar', emptyHistory: 'Inga sparade chattar än',
@@ -1234,7 +1242,7 @@ const EXTRA_LOCALES = {
     offlineSendError: 'Du är offline. Anslut för att skicka nya meddelanden.',
     settingsTitle: 'Inställningar', appearanceSection: 'Utseende & Språk', languageLabel: 'Språk',
     languageDesc: 'Välj bland 40 språk', darkModeLabel: 'Mörkt läge', darkModeDesc: 'Behagligt i svagt ljus',
-    modelSection: 'AI-nivåer (Gemini 4 Hydrogen)', defaultModelLabel: 'Standardnivå',
+    modelSection: 'AI-nivåer (gemini-4-hydrogen)', defaultModelLabel: 'Standardnivå',
     systemInstructionLabel: 'Systeminstruktion', systemInstructionDesc: 'Styr svarsstilen',
     dataSection: 'Lokal offlinelagring', clearHistoryLabel: 'Rensa alla chattar',
     clearHistoryDesc: 'Ta bort lokal historik', clearHistoryButton: 'Rensa historik', versionLabel: 'Version'
@@ -1254,7 +1262,7 @@ const EXTRA_LOCALES = {
     offlineSendError: 'Du er frakoblet. Koble til for å sende nye meldinger.',
     settingsTitle: 'Innstillinger', appearanceSection: 'Utseende og språk', languageLabel: 'Språk',
     languageDesc: 'Velg blant 40 språk', darkModeLabel: 'Mørk modus', darkModeDesc: 'Skånsomt i lite lys',
-    modelSection: 'AI-nivåer (Gemini 4 Hydrogen)', defaultModelLabel: 'Standardnivå',
+    modelSection: 'AI-nivåer (gemini-4-hydrogen)', defaultModelLabel: 'Standardnivå',
     systemInstructionLabel: 'Systeminstruksjon', dataSection: 'Lokal lagring',
     clearHistoryLabel: 'Slett alle samtaler', clearHistoryButton: 'Slett historikk', versionLabel: 'Versjon'
   },
@@ -1273,7 +1281,7 @@ const EXTRA_LOCALES = {
     offlineSendError: 'Du er offline. Opret forbindelse for at sende beskeder.',
     settingsTitle: 'Indstillinger', appearanceSection: 'Udseende og sprog', languageLabel: 'Sprog',
     languageDesc: 'Vælg mellem 40 sprog', darkModeLabel: 'Mørk tilstand',
-    modelSection: 'AI-niveauer (Gemini 4 Hydrogen)', defaultModelLabel: 'Standardniveau',
+    modelSection: 'AI-niveauer (gemini-4-hydrogen)', defaultModelLabel: 'Standardniveau',
     systemInstructionLabel: 'Systeminstruktion', dataSection: 'Lokal offline lagring',
     clearHistoryLabel: 'Ryd alle samtaler', clearHistoryButton: 'Ryd historik', versionLabel: 'Version'
   },
@@ -1292,7 +1300,7 @@ const EXTRA_LOCALES = {
     offlineSendError: 'Olet offline-tilassa. Yhdistä verkkoon lähettääksesi viestin.',
     settingsTitle: 'Asetukset', appearanceSection: 'Ulkoasu ja kieli', languageLabel: 'Kieli',
     languageDesc: 'Valitse 40 kielestä', darkModeLabel: 'Tumma tila',
-    modelSection: 'AI-tasot (Gemini 4 Hydrogen)', defaultModelLabel: 'Oletustaso',
+    modelSection: 'AI-tasot (gemini-4-hydrogen)', defaultModelLabel: 'Oletustaso',
     systemInstructionLabel: 'Järjestelmäohje', dataSection: 'Paikallinen tallennus',
     clearHistoryLabel: 'Tyhjennä kaikki keskustelut', clearHistoryButton: 'Tyhjennä historia', versionLabel: 'Versio'
   },
@@ -1311,7 +1319,7 @@ const EXTRA_LOCALES = {
     offlineSendError: 'Είστε εκτός σύνδεσης. Συνδεθείτε για αποστολή μηνυμάτων.',
     settingsTitle: 'Ρυθμίσεις', appearanceSection: 'Εμφάνιση & Γλώσσα', languageLabel: 'Γλώσσα',
     languageDesc: 'Επιλέξτε από 40 γλώσσες', darkModeLabel: 'Σκούρο θέμα',
-    modelSection: 'Επίπεδα AI (Gemini 4 Hydrogen)', defaultModelLabel: 'Προεπιλεγμένο επίπεδο',
+    modelSection: 'Επίπεδα AI (gemini-4-hydrogen)', defaultModelLabel: 'Προεπιλεγμένο επίπεδο',
     systemInstructionLabel: 'Οδηγία συστήματος', dataSection: 'Τοπική αποθήκευση',
     clearHistoryLabel: 'Εκκαθάριση συνομιλιών', clearHistoryButton: 'Εκκαθάριση', versionLabel: 'Έκδοση'
   },
@@ -1330,7 +1338,7 @@ const EXTRA_LOCALES = {
     offlineSendError: 'Jste offline. Pro odeslání se připojte k internetu.',
     settingsTitle: 'Nastavení', appearanceSection: 'Vzhled a jazyk', languageLabel: 'Jazyk',
     languageDesc: 'Vyberte ze 40 jazyků', darkModeLabel: 'Tmavý režim',
-    modelSection: 'Úrovně AI (Gemini 4 Hydrogen)', defaultModelLabel: 'Výchozí úroveň',
+    modelSection: 'Úrovně AI (gemini-4-hydrogen)', defaultModelLabel: 'Výchozí úroveň',
     systemInstructionLabel: 'Systémová instrukce', dataSection: 'Místní úložiště',
     clearHistoryLabel: 'Vymazat vše', clearHistoryButton: 'Vymazat historii', versionLabel: 'Verze'
   },
@@ -1349,7 +1357,7 @@ const EXTRA_LOCALES = {
     offlineSendError: 'Ești offline. Reconectează-te pentru a trimite mesaje.',
     settingsTitle: 'Setări', appearanceSection: 'Aspect și limbă', languageLabel: 'Limbă',
     languageDesc: 'Alege din 40 de limbi', darkModeLabel: 'Mod întunecat',
-    modelSection: 'Niveluri AI (Gemini 4 Hydrogen)', defaultModelLabel: 'Nivel implicit',
+    modelSection: 'Niveluri AI (gemini-4-hydrogen)', defaultModelLabel: 'Nivel implicit',
     systemInstructionLabel: 'Instrucțiune de sistem', dataSection: 'Stocare locală offline',
     clearHistoryLabel: 'Șterge toate conversațiile', clearHistoryButton: 'Șterge istoricul', versionLabel: 'Versiune'
   },
@@ -1368,7 +1376,7 @@ const EXTRA_LOCALES = {
     offlineSendError: 'Offline vagy. Csatlakozz az internethez üzenetküldéshez.',
     settingsTitle: 'Beállítások', appearanceSection: 'Megjelenés és nyelv', languageLabel: 'Nyelv',
     languageDesc: 'Válassz 40 nyelv közül', darkModeLabel: 'Sötét mód',
-    modelSection: 'AI szintek (Gemini 4 Hydrogen)', defaultModelLabel: 'Alapértelmezett szint',
+    modelSection: 'AI szintek (gemini-4-hydrogen)', defaultModelLabel: 'Alapértelmezett szint',
     systemInstructionLabel: 'Rendszerutasítás', dataSection: 'Helyi offline tárhely',
     clearHistoryLabel: 'Összes törlése', clearHistoryButton: 'Előzmények törlése', versionLabel: 'Verzió'
   },
@@ -1387,7 +1395,7 @@ const EXTRA_LOCALES = {
     offlineSendError: 'Anda sedang offline. Sambungkan internet untuk mengirim pesan.',
     settingsTitle: 'Pengaturan', appearanceSection: 'Tampilan & Bahasa', languageLabel: 'Bahasa',
     languageDesc: 'Pilih dari 40 bahasa dunia', darkModeLabel: 'Mode gelap',
-    modelSection: 'Tingkat AI (Gemini 4 Hydrogen)', defaultModelLabel: 'Tingkat default',
+    modelSection: 'Tingkat AI (gemini-4-hydrogen)', defaultModelLabel: 'Tingkat default',
     systemInstructionLabel: 'Instruksi sistem', dataSection: 'Penyimpanan lokal offline',
     clearHistoryLabel: 'Hapus semua obrolan', clearHistoryButton: 'Hapus riwayat', versionLabel: 'Versi'
   },
@@ -1406,7 +1414,7 @@ const EXTRA_LOCALES = {
     offlineSendError: 'Anda berada di luar talian. Sambung ke internet untuk menghantar mesej.',
     settingsTitle: 'Tetapan', appearanceSection: 'Penampilan & Bahasa', languageLabel: 'Bahasa',
     languageDesc: 'Pilih daripada 40 bahasa', darkModeLabel: 'Mod gelap',
-    modelSection: 'Tahap AI (Gemini 4 Hydrogen)', defaultModelLabel: 'Tahap lalai',
+    modelSection: 'Tahap AI (gemini-4-hydrogen)', defaultModelLabel: 'Tahap lalai',
     systemInstructionLabel: 'Arahan sistem', dataSection: 'Storan tempatan luar talian',
     clearHistoryLabel: 'Padam semua sembang', clearHistoryButton: 'Padam sejarah', versionLabel: 'Versi'
   },
@@ -1425,7 +1433,7 @@ const EXTRA_LOCALES = {
     offlineSendError: 'คุณกำลังออฟไลน์ กรุณาเชื่อมต่ออินเทอร์เน็ตเพื่อส่งข้อความใหม่',
     settingsTitle: 'การตั้งค่า', appearanceSection: 'รูปลักษณ์และภาษา', languageLabel: 'ภาษา',
     languageDesc: 'เลือกได้ 40 ภาษา', darkModeLabel: 'โหมดมืด',
-    modelSection: 'ระดับ AI (Gemini 4 Hydrogen)', defaultModelLabel: 'ระดับเริ่มต้น',
+    modelSection: 'ระดับ AI (gemini-4-hydrogen)', defaultModelLabel: 'ระดับเริ่มต้น',
     systemInstructionLabel: 'คำสั่งระบบ', dataSection: 'พื้นที่เก็บข้อมูลออฟไลน์',
     clearHistoryLabel: 'ล้างแชททั้งหมด', clearHistoryButton: 'ล้างประวัติ', versionLabel: 'เวอร์ชัน'
   },
@@ -1444,7 +1452,7 @@ const EXTRA_LOCALES = {
     offlineSendError: 'Bạn đang ngoại tuyến. Hãy kết nối mạng để gửi tin nhắn mới.',
     settingsTitle: 'Cài đặt', appearanceSection: 'Giao diện & Ngôn ngữ', languageLabel: 'Ngôn ngữ',
     languageDesc: 'Chọn từ 40 ngôn ngữ', darkModeLabel: 'Chế độ tối',
-    modelSection: 'Cấp độ AI (Gemini 4 Hydrogen)', defaultModelLabel: 'Cấp độ mặc định',
+    modelSection: 'Cấp độ AI (gemini-4-hydrogen)', defaultModelLabel: 'Cấp độ mặc định',
     systemInstructionLabel: 'Hướng dẫn hệ thống', dataSection: 'Lưu trữ cục bộ ngoại tuyến',
     clearHistoryLabel: 'Xóa tất cả cuộc trò chuyện', clearHistoryButton: 'Xóa lịch sử', versionLabel: 'Phiên bản'
   },
@@ -1463,7 +1471,7 @@ const EXTRA_LOCALES = {
     offlineSendError: 'আপনি অফলাইনে আছেন। নতুন বার্তা পাঠাতে ইন্টারনেট সংযোগ দিন।',
     settingsTitle: 'সেটিংস', appearanceSection: 'চেহারা ও ভাষা', languageLabel: 'ভাষা',
     languageDesc: '৪০টি ভাষা থেকে বেছে নিন', darkModeLabel: 'ডার্ক মোড',
-    modelSection: 'AI স্তর (Gemini 4 Hydrogen)', defaultModelLabel: 'ডিফল্ট স্তর',
+    modelSection: 'AI স্তর (gemini-4-hydrogen)', defaultModelLabel: 'ডিফল্ট স্তর',
     systemInstructionLabel: 'সিস্টেম নির্দেশনা', dataSection: 'অফলাইন স্থানীয় সঞ্চয়',
     clearHistoryLabel: 'সব চ্যাট মুছুন', clearHistoryButton: 'ইতিহাস মুছুন', versionLabel: 'সংস্করণ'
   },
@@ -1482,7 +1490,7 @@ const EXTRA_LOCALES = {
     offlineSendError: 'நீங்கள் ஆஃப்லைனில் உள்ளீர்கள். புதிய செய்திகளை அனுப்ப இணையத்தில் இணையவும்.',
     settingsTitle: 'அமைப்புகள்', appearanceSection: 'தோற்றம் மற்றும் மொழி', languageLabel: 'மொழி',
     languageDesc: '40 உலக மொழிகளில் தேர்வு செய்யவும்', darkModeLabel: 'இருண்ட பயன்முறை',
-    modelSection: 'AI நிலைகள் (Gemini 4 Hydrogen)', defaultModelLabel: 'இயல்புநிலை நிலை',
+    modelSection: 'AI நிலைகள் (gemini-4-hydrogen)', defaultModelLabel: 'இயல்புநிலை நிலை',
     systemInstructionLabel: 'கணினி வழிமுறை', dataSection: 'ஆஃப்லைன் உள்ளூர் சேமிப்பகம்',
     clearHistoryLabel: 'அனைத்து அரட்டைகளையும் அழி', clearHistoryButton: 'வரலாற்றை அழி', versionLabel: 'பதிப்பு'
   },
@@ -1501,7 +1509,7 @@ const EXTRA_LOCALES = {
     offlineSendError: 'మీరు ఆఫ్‌లైన్‌లో ఉన్నారు. పంపడానికి ఇంటర్నెట్‌కు కనెక్ట్ అవ్వండి.',
     settingsTitle: 'సెట్టింగ్‌లు', appearanceSection: 'రూపం & భాష', languageLabel: 'భాష',
     languageDesc: '40 భాషల నుండి ఎంచుకోండి', darkModeLabel: 'డార్క్ మోడ్',
-    modelSection: 'AI స్థాయిలు (Gemini 4 Hydrogen)', defaultModelLabel: 'డిఫాల్ట్ స్థాయి',
+    modelSection: 'AI స్థాయిలు (gemini-4-hydrogen)', defaultModelLabel: 'డిఫాల్ట్ స్థాయి',
     systemInstructionLabel: 'సిస్టమ్ సూచన', dataSection: 'ఆఫ్‌లైన్ స్థానిక నిల్వ',
     clearHistoryLabel: 'అన్ని చాట్‌లను క్లియర్ చేయి', clearHistoryButton: 'చరిత్రను క్లియర్ చేయి', versionLabel: 'వెర్షన్'
   },
@@ -1520,7 +1528,7 @@ const EXTRA_LOCALES = {
     offlineSendError: 'तुम्ही ऑफलाइन आहात. पाठवण्यासाठी इंटरनेटशी कनेक्ट व्हा.',
     settingsTitle: 'सेटिंग्ज', appearanceSection: 'स्वरूप आणि भाषा', languageLabel: 'भाषा',
     languageDesc: '४० भाषांमधून निवडा', darkModeLabel: 'डार्क मोड',
-    modelSection: 'AI स्तर (Gemini 4 Hydrogen)', defaultModelLabel: 'डीफॉल्ट स्तर',
+    modelSection: 'AI स्तर (gemini-4-hydrogen)', defaultModelLabel: 'डीफॉल्ट स्तर',
     systemInstructionLabel: 'सिस्टम सूचना', dataSection: 'ऑफलाइन स्थानिक संचयन',
     clearHistoryLabel: 'सर्व चॅट साफ करा', clearHistoryButton: 'इतिहास साफ करा', versionLabel: 'आवृत्ती'
   },
@@ -1539,7 +1547,7 @@ const EXTRA_LOCALES = {
     offlineSendError: 'Uko nje ya mtandao. Unganisha intaneti kutuma ujumbe mpya.',
     settingsTitle: 'Mipangilio', appearanceSection: 'Muonekano na Lugha', languageLabel: 'Lugha',
     languageDesc: 'Chagua kati ya lugha 40', darkModeLabel: 'Hali ya giza',
-    modelSection: 'Viwango vya AI (Gemini 4 Hydrogen)', defaultModelLabel: 'Kiwango chaguomsingi',
+    modelSection: 'Viwango vya AI (gemini-4-hydrogen)', defaultModelLabel: 'Kiwango chaguomsingi',
     systemInstructionLabel: 'Maelekezo ya mfumo', dataSection: 'Hifadhi ya ndani',
     clearHistoryLabel: 'Futa mazungumzo yote', clearHistoryButton: 'Futa historia', versionLabel: 'Toleo'
   },
@@ -1558,7 +1566,7 @@ const EXTRA_LOCALES = {
     offlineSendError: 'ከመስመር ውጭ ነዎት። አዲስ መልዕክት ለመላክ ከኢንተርኔት ጋር ይገናኙ።',
     settingsTitle: 'ቅንብሮች', appearanceSection: 'ገጽታ እና ቋንቋ', languageLabel: 'ቋንቋ',
     languageDesc: 'ከ40 ቋንቋዎች ይምረጡ', darkModeLabel: 'ጨለማ ሁነታ',
-    modelSection: 'የAI ደረጃዎች (Gemini 4 Hydrogen)', defaultModelLabel: 'ነባሪ ደረጃ',
+    modelSection: 'የAI ደረጃዎች (gemini-4-hydrogen)', defaultModelLabel: 'ነባሪ ደረጃ',
     systemInstructionLabel: 'የስርዓት መመሪያ', dataSection: 'የአካባቢ ማከማቻ',
     clearHistoryLabel: 'ሁሉንም ውይይቶች አጽዳ', clearHistoryButton: 'ታሪክ አጽዳ', versionLabel: 'ስሪት'
   },
@@ -1577,7 +1585,7 @@ const EXTRA_LOCALES = {
     offlineSendError: 'Oflaynsınız. Yeni mesaj göndərmək üçün internetə qoşulun.',
     settingsTitle: 'Ayarlar', appearanceSection: 'Görünüş və Dil', languageLabel: 'Dil',
     languageDesc: '40 dünya dilindən seçin', darkModeLabel: 'Qaranlıq rejim',
-    modelSection: 'AI Səviyyələri (Gemini 4 Hydrogen)', defaultModelLabel: 'Varsayılan səviyyə',
+    modelSection: 'AI Səviyyələri (gemini-4-hydrogen)', defaultModelLabel: 'Varsayılan səviyyə',
     systemInstructionLabel: 'Sistem təlimatı', dataSection: 'Yerli oflayn yaddaş',
     clearHistoryLabel: 'Bütün söhbətləri sil', clearHistoryButton: 'Tarixçəni sil', versionLabel: 'Versiya'
   },
@@ -1596,7 +1604,7 @@ const EXTRA_LOCALES = {
     offlineSendError: 'Siz oflaynsiz. Yangi xabar yuborish uchun internetga ulaning.',
     settingsTitle: 'Sozlamalar', appearanceSection: 'Ko‘rinish va Til', languageLabel: 'Til',
     languageDesc: '40 ta tildan birini tanlang', darkModeLabel: 'Tungi rejim',
-    modelSection: 'AI darajalari (Gemini 4 Hydrogen)', defaultModelLabel: 'Standart daraja',
+    modelSection: 'AI darajalari (gemini-4-hydrogen)', defaultModelLabel: 'Standart daraja',
     systemInstructionLabel: 'Tizim ko‘rsatmasi', dataSection: 'Oflayn mahalliy xotira',
     clearHistoryLabel: 'Barcha suhbatlarni o‘chirish', clearHistoryButton: 'Tarixni tozalash', versionLabel: 'Versiya'
   },
@@ -1615,7 +1623,7 @@ const EXTRA_LOCALES = {
     offlineSendError: 'Kasalukuyang offline ka. Kumonekta muna upang makapagpadala.',
     settingsTitle: 'Mga Setting', appearanceSection: 'Hitsura at Wika', languageLabel: 'Wika',
     languageDesc: 'Pumili mula sa 40 wika', darkModeLabel: 'Dark mode',
-    modelSection: 'Mga Antas ng AI (Gemini 4 Hydrogen)', defaultModelLabel: 'Default na antas',
+    modelSection: 'Mga Antas ng AI (gemini-4-hydrogen)', defaultModelLabel: 'Default na antas',
     systemInstructionLabel: 'Instruksyon ng sistema', dataSection: 'Offline na lokal na imbakan',
     clearHistoryLabel: 'I-clear lahat ng usapan', clearHistoryButton: 'I-clear ang kasaysayan', versionLabel: 'Bersyon'
   }

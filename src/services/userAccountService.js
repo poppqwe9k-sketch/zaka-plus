@@ -25,7 +25,12 @@ import {
   normalizePlan,
   sanitizeDisplayName
 } from '../utils/authAdmin.js';
-import { CREDITS_CYCLE_MS, getLocalDateKey } from '../utils/credits.js';
+import { getLocalDateKey } from '../utils/credits.js';
+import {
+  getPacificCycleStartMs,
+  getPacificDateKey,
+  isPacificCycleExpired
+} from '../utils/pacificTime.js';
 import { GEMINI_HYDROGEN_MODEL_ID, SUPER_MODEL_TIER } from '../shared/modelTiers.js';
 import {
   normalizeChatRecord,
@@ -335,8 +340,9 @@ export async function clearUserChatsInFirestore(uid, chatIds = []) {
   }
 }
 
-export async function recordModelUsageInFirestore(usedTierOrModel) {
+export async function recordModelUsageInFirestore(usedTierOrModel, charCount = 0) {
   const isPlusPlus = usedTierOrModel === SUPER_MODEL_TIER || usedTierOrModel === GEMINI_HYDROGEN_MODEL_ID;
+  const safeChars = Math.max(0, Math.min(200000, Math.floor(Number(charCount) || 0)));
   const quotaRef = doc(db, 'analytics', 'quota');
   const path = 'analytics/quota';
 
@@ -344,12 +350,17 @@ export async function recordModelUsageInFirestore(usedTierOrModel) {
     return await runTransaction(db, async (tx) => {
       const snap = await tx.get(quotaRef);
       const now = Date.now();
+      const ptCycleStart = getPacificCycleStartMs(now);
+      const ptDateKey = getPacificDateKey(now);
 
       if (!snap.exists()) {
         const nextDoc = {
-          cycleStartedAt: now,
+          cycleStartedAt: ptCycleStart,
+          ptDateKey,
           plusPlusUsed: isPlusPlus ? 1 : 0,
-          plusUsed: isPlusPlus ? 0 : 1
+          plusUsed: isPlusPlus ? 0 : 1,
+          plusPlusChars: isPlusPlus ? safeChars : 0,
+          plusChars: isPlusPlus ? 0 : safeChars
         };
         tx.set(quotaRef, {
           ...nextDoc,
@@ -360,13 +371,20 @@ export async function recordModelUsageInFirestore(usedTierOrModel) {
 
       const data = snap.data() || {};
       const startedAt = Number(data.cycleStartedAt) || 0;
-      const expired = startedAt <= 0 || now < startedAt || (now - startedAt >= CREDITS_CYCLE_MS);
+      const existingPtDateKey = typeof data.ptDateKey === 'string' ? data.ptDateKey : '';
+      const needsMigrationOrReset = !existingPtDateKey
+        || typeof data.plusPlusChars !== 'number'
+        || typeof data.plusChars !== 'number'
+        || isPacificCycleExpired(startedAt, existingPtDateKey, now);
 
-      if (expired) {
+      if (needsMigrationOrReset) {
         const nextDoc = {
-          cycleStartedAt: now,
+          cycleStartedAt: ptCycleStart,
+          ptDateKey,
           plusPlusUsed: isPlusPlus ? 1 : 0,
-          plusUsed: isPlusPlus ? 0 : 1
+          plusUsed: isPlusPlus ? 0 : 1,
+          plusPlusChars: isPlusPlus ? safeChars : 0,
+          plusChars: isPlusPlus ? 0 : safeChars
         };
         tx.update(quotaRef, {
           ...nextDoc,
@@ -377,27 +395,37 @@ export async function recordModelUsageInFirestore(usedTierOrModel) {
 
       const currentPlusPlus = Math.max(0, Math.floor(Number(data.plusPlusUsed) || 0));
       const currentPlus = Math.max(0, Math.floor(Number(data.plusUsed) || 0));
+      const currentPlusPlusChars = Math.max(0, Math.floor(Number(data.plusPlusChars) || 0));
+      const currentPlusChars = Math.max(0, Math.floor(Number(data.plusChars) || 0));
 
       if (isPlusPlus) {
         tx.update(quotaRef, {
           plusPlusUsed: currentPlusPlus + 1,
+          plusPlusChars: currentPlusPlusChars + safeChars,
           updatedAt: serverTimestamp()
         });
         return {
           cycleStartedAt: startedAt,
+          ptDateKey: existingPtDateKey,
           plusPlusUsed: currentPlusPlus + 1,
-          plusUsed: currentPlus
+          plusUsed: currentPlus,
+          plusPlusChars: currentPlusPlusChars + safeChars,
+          plusChars: currentPlusChars
         };
       }
 
       tx.update(quotaRef, {
         plusUsed: currentPlus + 1,
+        plusChars: currentPlusChars + safeChars,
         updatedAt: serverTimestamp()
       });
       return {
         cycleStartedAt: startedAt,
+        ptDateKey: existingPtDateKey,
         plusPlusUsed: currentPlusPlus,
-        plusUsed: currentPlus + 1
+        plusUsed: currentPlus + 1,
+        plusPlusChars: currentPlusPlusChars,
+        plusChars: currentPlusChars + safeChars
       };
     });
   } catch (error) {
@@ -453,7 +481,14 @@ export function subscribeAdminDashboardData({
       onQuotaAnalytics?.(
         snapshot.exists()
           ? snapshot.data()
-          : { cycleStartedAt: 0, plusPlusUsed: 0, plusUsed: 0 }
+          : {
+              cycleStartedAt: getPacificCycleStartMs(),
+              ptDateKey: getPacificDateKey(),
+              plusPlusUsed: 0,
+              plusUsed: 0,
+              plusPlusChars: 0,
+              plusChars: 0
+            }
       );
     },
     (error) => {
@@ -534,7 +569,14 @@ export async function fetchAdminDashboardData() {
 
   const quotaAnalytics = quotaSnap?.exists()
     ? quotaSnap.data()
-    : { cycleStartedAt: 0, plusPlusUsed: 0, plusUsed: 0 };
+    : {
+        cycleStartedAt: getPacificCycleStartMs(),
+        ptDateKey: getPacificDateKey(),
+        plusPlusUsed: 0,
+        plusUsed: 0,
+        plusPlusChars: 0,
+        plusChars: 0
+      };
 
   return { users, analytics, quotaAnalytics };
 }
