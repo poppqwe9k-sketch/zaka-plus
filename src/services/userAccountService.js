@@ -296,6 +296,21 @@ export async function upsertUserChatInFirestore(uid, chat, { isKnownRemote = fal
       updatedAt: serverTimestamp()
     });
   } catch (error) {
+    const code = error?.code || '';
+    if (!isKnownRemote && (code === 'permission-denied' || code === 'already-exists')) {
+      try {
+        await updateDoc(chatRef, {
+          title: prepared.title,
+          messages: prepared.messages,
+          updatedAtMs: prepared.updatedAtMs,
+          updatedAt: serverTimestamp()
+        });
+        return;
+      } catch (updateErr) {
+        handleFirestoreError(updateErr, OperationType.UPDATE, path);
+        return;
+      }
+    }
     handleFirestoreError(error, OperationType.CREATE, path);
   }
 }

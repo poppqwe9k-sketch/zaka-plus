@@ -1,8 +1,6 @@
-const CACHE_NAME = 'zaka-plus-v10';
+const CACHE_NAME = 'zaka-plus-v11';
 const APP_CACHE_PREFIX = 'zaka-plus-';
 const APP_SHELL = [
-  '/',
-  '/index.html',
   '/manifest.json?v=5',
   '/logo.png?v=6',
   '/pwa-192x192.png?v=5',
@@ -13,7 +11,10 @@ const APP_SHELL = [
 ];
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL)));
+  event.waitUntil(
+    caches.open(CACHE_NAME)
+      .then((cache) => Promise.allSettled(APP_SHELL.map((url) => cache.add(url))))
+  );
   self.skipWaiting();
 });
 
@@ -35,6 +36,7 @@ self.addEventListener('fetch', (event) => {
     || url.origin !== self.location.origin
     || url.pathname.startsWith('/api/')
     || url.pathname.startsWith('/__/')
+    || url.pathname.startsWith('/assets/')
     || url.pathname.startsWith('/@')
     || url.pathname.startsWith('/node_modules/')
   ) {
@@ -43,8 +45,9 @@ self.addEventListener('fetch', (event) => {
 
   if (request.mode === 'navigate') {
     event.respondWith(
-      fetch(request).then((response) => {
-        if (response.ok) {
+      fetch(new Request(request, { cache: 'no-store' })).then((response) => {
+        const contentType = response.headers.get('content-type') || '';
+        if (response.ok && contentType.includes('text/html')) {
           const copy = response.clone();
           event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.put('/index.html', copy)));
         }
@@ -57,23 +60,18 @@ self.addEventListener('fetch', (event) => {
   // Network-first for unhashed source files (/src/*) so module updates never go stale.
   if (
     url.pathname.startsWith('/src/')
-    || (!url.pathname.startsWith('/assets/') && (url.pathname.endsWith('.js') || url.pathname.endsWith('.jsx') || url.pathname.endsWith('.css')))
+    || url.pathname.endsWith('.js')
+    || url.pathname.endsWith('.jsx')
+    || url.pathname.endsWith('.css')
   ) {
     event.respondWith(
-      fetch(request).then((response) => {
-        if (response.ok) {
-          const copy = response.clone();
-          event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.put(request, copy)));
-        }
-        return response;
-      }).catch(async () => (await caches.match(request)) || Response.error())
+      fetch(request).catch(async () => (await caches.match(request)) || Response.error())
     );
     return;
   }
 
   if (
-    url.pathname.startsWith('/assets/')
-    || url.pathname === '/manifest.json'
+    url.pathname === '/manifest.json'
     || url.pathname === '/manifest.webmanifest'
     || url.pathname.endsWith('.png')
     || url.pathname.endsWith('.ico')

@@ -48,23 +48,58 @@
     </script>
     <script>
       try {
-        if ('caches' in window) {
-          caches.delete('zaka-plus-v5').catch(() => {});
-          caches.delete('zaka-plus-v6').catch(() => {});
-          caches.delete('zaka-plus-v7').catch(() => {});
-          caches.delete('zaka-plus-v8').catch(() => {});
-          caches.delete('zaka-plus-v9').catch(() => {});
-        }
+        var clearOldAppCaches = function () {
+          if (!('caches' in window)) return Promise.resolve();
+          return caches.keys().then(function (keys) {
+            return Promise.all(
+              keys
+                .filter(function (key) {
+                  return key.indexOf('zaka-plus-') === 0 && key !== 'zaka-plus-v11';
+                })
+                .map(function (key) {
+                  return caches.delete(key);
+                })
+            );
+          }).catch(function () {});
+        };
+        clearOldAppCaches();
+
+        var recoverFromStaleChunk = function () {
+          if (sessionStorage.getItem('zaka-chunk-recover-v11')) return;
+          sessionStorage.setItem('zaka-chunk-recover-v11', '1');
+          clearOldAppCaches().finally(function () {
+            window.location.reload();
+          });
+        };
+
+        window.addEventListener('vite:preloadError', recoverFromStaleChunk);
+        window.addEventListener('error', function (event) {
+          var target = event && event.target;
+          if (target && target.tagName === 'SCRIPT' && target.src && target.src.indexOf('/assets/') !== -1) {
+            recoverFromStaleChunk();
+          }
+        }, true);
+
         if ('serviceWorker' in navigator) {
           const hadController = Boolean(navigator.serviceWorker.controller);
           navigator.serviceWorker.addEventListener('controllerchange', () => {
-            if (hadController && !sessionStorage.getItem('zaka-sw-reloaded-v8')) {
-              sessionStorage.setItem('zaka-sw-reloaded-v8', '1');
+            if (hadController && !sessionStorage.getItem('zaka-sw-reloaded-v11')) {
+              sessionStorage.setItem('zaka-sw-reloaded-v11', '1');
               window.location.reload();
             }
           });
           navigator.serviceWorker.getRegistrations().then((regs) => {
-            regs.forEach((reg) => reg.update().catch(() => {}));
+            regs.forEach((reg) => {
+              var scriptUrl = (reg.active && reg.active.scriptURL)
+                || (reg.waiting && reg.waiting.scriptURL)
+                || (reg.installing && reg.installing.scriptURL)
+                || '';
+              if (scriptUrl.indexOf('/service-worker.js') !== -1) {
+                reg.unregister().catch(() => {});
+              } else {
+                reg.update().catch(() => {});
+              }
+            });
           }).catch(() => {});
         }
       } catch { /* Ignore SW cleanup issues. */ }

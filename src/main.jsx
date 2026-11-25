@@ -8,34 +8,43 @@ import './app-enhancements.css';
 import './logo-image.css';
 import './pwa.css';
 
-ReactDOM.createRoot(document.getElementById('root')).render(
-  <React.StrictMode>
-    <ErrorBoundary>
-      <App />
-    </ErrorBoundary>
-  </React.StrictMode>
-);
+const rootElement = document.getElementById('root');
+if (rootElement) {
+  ReactDOM.createRoot(rootElement).render(
+    <React.StrictMode>
+      <ErrorBoundary>
+        <App />
+      </ErrorBoundary>
+    </React.StrictMode>
+  );
+}
 
 function installSidebarEnhancements() {
-  const sidebar = document.querySelector('.chat-sidebar');
-  if (!sidebar) return;
+  try {
+    const sidebar = document.querySelector('.chat-sidebar');
+    if (!sidebar) return;
 
-  if (!sidebar.querySelector('.pwa-install-mount')) {
-    const installMount = document.createElement('div');
-    installMount.className = 'pwa-install-mount';
-    const footer = sidebar.querySelector('.sidebar-footer');
-    sidebar.insertBefore(installMount, footer || null);
-    ReactDOM.createRoot(installMount).render(<PwaInstall />);
+    if (!sidebar.querySelector('.pwa-install-mount')) {
+      const installMount = document.createElement('div');
+      installMount.className = 'pwa-install-mount';
+      const footer = sidebar.querySelector('.sidebar-footer');
+      sidebar.insertBefore(installMount, footer || null);
+      ReactDOM.createRoot(installMount).render(<PwaInstall />);
+    }
+  } catch {
+    // Ignore optional sidebar enhancement errors to keep core UI running.
   }
 }
 
-const sidebarObserver = new MutationObserver(installSidebarEnhancements);
-sidebarObserver.observe(document.body, { childList: true, subtree: true });
-installSidebarEnhancements();
+if (typeof document !== 'undefined' && document.body && typeof MutationObserver !== 'undefined') {
+  const sidebarObserver = new MutationObserver(installSidebarEnhancements);
+  sidebarObserver.observe(document.body, { childList: true, subtree: true });
+  installSidebarEnhancements();
+}
 
-if ('serviceWorker' in navigator) {
+if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js?v=10')
+    navigator.serviceWorker.register('/sw.js?v=11')
       .then((reg) => reg.update().catch(() => {}))
       .catch((error) => {
         console.error('Service worker registration failed:', error);
