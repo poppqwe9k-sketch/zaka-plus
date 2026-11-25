@@ -181,4 +181,6 @@ test('filters and sorts registered users and paid subscribers accurately', () =>
 test('maps Firebase Auth error codes to localized readable messages', () => {
   assert.match(mapFirebaseAuthError({ code: 'auth/invalid-credential' }), /غير صحيحة/);
   assert.match(mapFirebaseAuthError({ code: 'auth/operation-not-allowed' }), /Google/);
+  assert.match(mapFirebaseAuthError({ code: 'auth/unauthorized-domain' }), /Authorized domains/);
+  assert.match(mapFirebaseAuthError({ code: 'auth/account-exists-with-different-credential' }), /طريقة دخول أخرى/);
 });

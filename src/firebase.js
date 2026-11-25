@@ -1,11 +1,28 @@
 import { initializeApp } from 'firebase/app';
 import { GoogleAuthProvider, getAuth } from 'firebase/auth';
 import { doc, getDocFromServer, getFirestore } from 'firebase/firestore';
-import firebaseConfig from '../firebase-applet-config.json';
+import firebaseConfigFile from '../firebase-applet-config.json';
+
+const viteEnv = typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env : {};
+const firebaseConfig = {
+  ...firebaseConfigFile,
+  ...(viteEnv.VITE_FIREBASE_API_KEY ? { apiKey: viteEnv.VITE_FIREBASE_API_KEY } : {}),
+  ...(viteEnv.VITE_FIREBASE_AUTH_DOMAIN ? { authDomain: viteEnv.VITE_FIREBASE_AUTH_DOMAIN } : {}),
+  ...(viteEnv.VITE_FIREBASE_PROJECT_ID ? { projectId: viteEnv.VITE_FIREBASE_PROJECT_ID } : {}),
+  ...(viteEnv.VITE_FIREBASE_STORAGE_BUCKET ? { storageBucket: viteEnv.VITE_FIREBASE_STORAGE_BUCKET } : {}),
+  ...(viteEnv.VITE_FIREBASE_MESSAGING_SENDER_ID ? { messagingSenderId: viteEnv.VITE_FIREBASE_MESSAGING_SENDER_ID } : {}),
+  ...(viteEnv.VITE_FIREBASE_APP_ID ? { appId: viteEnv.VITE_FIREBASE_APP_ID } : {}),
+  ...(viteEnv.VITE_FIREBASE_DATABASE_ID !== undefined ? { firestoreDatabaseId: viteEnv.VITE_FIREBASE_DATABASE_ID } : {})
+};
 
 const app = initializeApp(firebaseConfig);
+const databaseId = typeof firebaseConfig.firestoreDatabaseId === 'string'
+  ? firebaseConfig.firestoreDatabaseId.trim()
+  : '';
 
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+export const db = databaseId && databaseId !== '(default)'
+  ? getFirestore(app, databaseId)
+  : getFirestore(app);
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });

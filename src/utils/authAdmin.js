@@ -297,6 +297,12 @@ export function mapFirebaseAuthError(error, t = {}) {
   if (code === 'auth/popup-blocked') {
     return t.authErrPopupBlocked || 'حظر المتصفح النافذة المنبثقة. اسمح بالنوافذ المنبثقة ثم أعد المحاولة.';
   }
+  if (code === 'auth/unauthorized-domain') {
+    return t.authErrUnauthorizedDomain || 'هذا النطاق غير مصرّح به في Firebase Authentication. أضفه إلى Authorized domains في لوحة Firebase.';
+  }
+  if (code === 'auth/account-exists-with-different-credential') {
+    return t.authErrDifferentCredential || 'يوجد حساب مسجل مسبقاً بنفس البريد عبر طريقة دخول أخرى.';
+  }
   if (code === 'auth/too-many-requests') {
     return t.authErrTooManyRequests || 'محاولات متكررة كثيرة. انتظر قليلاً ثم أعد المحاولة.';
   }
