@@ -104,6 +104,11 @@ test('POST /api/image rotates across GEMINI_KEY_1..GEMINI_KEY_13 for prompt tran
   assert.equal(res1.status, 200);
   const body1 = await res1.json();
   assert.deepEqual(usedKeys, ['img-key-1', 'img-key-2']);
+  assert.equal(body1.promptModel, 'gemini-4-hydrogen');
+  assert.equal(
+    body1.promptChars,
+    'صمم لي صورة 10 أشخاص'.length + 'A detailed wide photograph of 10 diverse people standing together'.length
+  );
   assert.equal(
     body1.englishPrompt,
     'A detailed wide photograph of 10 diverse people standing together, wide angle shot, high quality, detailed'

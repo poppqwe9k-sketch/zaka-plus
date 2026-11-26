@@ -131,7 +131,11 @@ export async function translatePromptWithGemini(userPrompt, {
       }, { model });
 
       if (englishText) {
-        return appendQualitySuffix(englishText);
+        return {
+          promptModel: model,
+          rawText: englishText,
+          englishPrompt: appendQualitySuffix(englishText)
+        };
       }
     } catch (error) {
       if (!isCustomGenerateFn && isUnavailableImageModelError(error)) {
@@ -145,7 +149,7 @@ export async function translatePromptWithGemini(userPrompt, {
     }
   }
 
-  return '';
+  return null;
 }
 
 export async function generatePollinationsImage({
@@ -165,10 +169,17 @@ export async function generatePollinationsImage({
   }
 
   let englishPrompt = '';
+  let promptModel = null;
+  let promptChars = 0;
   if (typeof translatePrompt === 'function') {
     englishPrompt = (await translatePrompt(cleanInput, fetchImpl)) || '';
   } else {
-    englishPrompt = await translatePromptWithGemini(cleanInput, { env, generateFn });
+    const geminiResult = await translatePromptWithGemini(cleanInput, { env, generateFn });
+    if (geminiResult && geminiResult.englishPrompt) {
+      englishPrompt = geminiResult.englishPrompt;
+      promptModel = geminiResult.promptModel || null;
+      promptChars = cleanInput.length + (geminiResult.rawText ? geminiResult.rawText.length : 0);
+    }
     if (!englishPrompt) {
       englishPrompt = await translatePromptWithMyMemory(cleanInput, fetchImpl);
     }
@@ -188,7 +199,8 @@ export async function generatePollinationsImage({
     imageUrl,
     englishPrompt,
     seed: safeSeed,
-    model
+    model,
+    ...(promptModel ? { promptModel, promptChars } : {})
   };
 }
 

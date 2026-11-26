@@ -62,8 +62,10 @@ test('AdminPanelModal renders independent Plus Plus (200) and Plus (10,000) capa
   assert.doesNotMatch(html, /جيمناي 4 هيدروجين/);
   assert.doesNotMatch(html, /Gemini 4 Hydrogen/);
   assert.match(html, /نموذج بلس بلاس \(gemini-4-hydrogen\)/);
+  assert.match(html, /الرسائل المتبقية اليوم/);
   assert.match(html, /185/);
   assert.match(html, /\/ 200/);
+  assert.match(html, /إجمالي الحروف المستهلكة اليوم/);
   assert.match(html, /3,450/);
   assert.match(html, /نموذج بلس \(gemini-3\.5-flash-lite\)/);
   assert.match(html, /9,940/);

@@ -362,6 +362,9 @@ export default function AdminPanelModal({
                   <span className="admin-capacity-percent">{dualCapacity.plusPlus.percentRemaining}%</span>
                 </div>
                 <div className="admin-capacity-numbers">
+                  <span className="admin-capacity-label">
+                    {t.adminRemainingTodayLabel || 'الرسائل المتبقية اليوم'}
+                  </span>
                   <div className="admin-capacity-main" data-testid="admin-capacity-plus-plus-value">
                     {formatCapacityNumber(dualCapacity.plusPlus.remaining)}{' '}
                     <span>/ {formatCapacityNumber(dualCapacity.plusPlus.targetCapacity)} {t.creditsUnitSingle}</span>
@@ -406,6 +409,9 @@ export default function AdminPanelModal({
                   <span className="admin-capacity-percent">{dualCapacity.plus.percentRemaining}%</span>
                 </div>
                 <div className="admin-capacity-numbers">
+                  <span className="admin-capacity-label">
+                    {t.adminRemainingTodayLabel || 'الرسائل المتبقية اليوم'}
+                  </span>
                   <div className="admin-capacity-main" data-testid="admin-capacity-plus-value">
                     {formatCapacityNumber(dualCapacity.plus.remaining)}{' '}
                     <span>/ {formatCapacityNumber(dualCapacity.plus.targetCapacity)} {t.creditsUnitSingle}</span>

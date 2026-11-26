@@ -45,4 +45,9 @@ test('formats live HH:MM:SS countdown until Google PT midnight and counts exchan
 
   assert.equal(calculateExchangeCharCount('مرحبا بك', 'أهلاً وسهلاً!'), 21);
   assert.equal(calculateExchangeCharCount('', 'رد'), 2);
+
+  // Summer PDT (UTC-7): 2026-07-15 00:00:00 PDT === 07:00:00 UTC === 10:00 Baghdad (UTC+3)
+  const summerPdtMidnight = Date.UTC(2026, 6, 15, 7, 0, 0);
+  assert.equal(getPacificCycleStartMs(summerPdtMidnight + 1000), summerPdtMidnight);
+  assert.equal(getBaghdadResetTimeLabel(summerPdtMidnight), '10:00');
 });

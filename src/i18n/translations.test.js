@@ -47,6 +47,15 @@ test('returns full localized UI copy for all 40 languages', () => {
       assert.equal(typeof copy[key], 'string', `Missing key ${key} for ${lang.code}`);
       assert.ok(copy[key].length > 0, `Empty key ${key} for ${lang.code}`);
     }
+    assert.equal(copy.modelProSubtitle, 'gemini-4-hydrogen', `Expected gemini-4-hydrogen subtitle for ${lang.code}`);
+    assert.equal(copy.modelFastSubtitle, 'gemini-3.5-flash-lite', `Expected gemini-3.5-flash-lite subtitle for ${lang.code}`);
+    assert.match(copy.adminModelPlusPlusTitle, /gemini-4-hydrogen/);
+    assert.match(copy.adminModelPlusTitle, /gemini-3\.5-flash-lite/);
+    for (const val of Object.values(copy)) {
+      if (typeof val === 'string') {
+        assert.doesNotMatch(val, /جيمناي|هيدروجين|Gemini 4 Hydrogen/i, `Found deprecated Hydrogen string in ${lang.code}`);
+      }
+    }
     assert.ok(copy.tiers?.plus?.label);
     assert.ok(copy.tiers?.['plus-plus']?.label);
     assert.ok(copy.tiers?.['plus-max']?.label);

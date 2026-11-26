@@ -352,13 +352,15 @@ service cloud.firestore {
                 ])
                 && (
                   !('ptDateKey' in existing())
+                  || !('plusPlusChars' in existing())
+                  || !('plusChars' in existing())
                   || (
                     request.time.toMillis() - existing().cycleStartedAt >= 82800000
                     && incoming().cycleStartedAt - existing().cycleStartedAt >= 82800000
                     && incoming().ptDateKey != existing().ptDateKey
                   )
                 )
-                && incoming().cycleStartedAt <= request.time.toMillis() + 60000
+                && incoming().cycleStartedAt <= request.time.toMillis() + 300000
                 && request.time.toMillis() - incoming().cycleStartedAt < 90000000
                 && incoming().plusPlusUsed >= 0 && incoming().plusPlusUsed <= 1
                 && incoming().plusUsed >= 0 && incoming().plusUsed <= 1

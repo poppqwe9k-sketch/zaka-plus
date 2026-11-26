@@ -1,6 +1,6 @@
 import { initializeApp } from 'firebase/app';
 import { GoogleAuthProvider, getAuth } from 'firebase/auth';
-import { doc, getDocFromServer, getFirestore } from 'firebase/firestore';
+import { doc, getDocFromServer, getFirestore, initializeFirestore } from 'firebase/firestore';
 import firebaseConfigFile from '../firebase-applet-config.json';
 import { resolveFirebaseConfig, resolveFirestoreDatabaseId } from './utils/firebaseConfig.js';
 
@@ -10,9 +10,20 @@ const firebaseConfig = resolveFirebaseConfig(firebaseConfigFile, viteEnv);
 const app = initializeApp(firebaseConfig);
 const databaseId = resolveFirestoreDatabaseId(firebaseConfig);
 
-export const db = databaseId
-  ? getFirestore(app, databaseId)
-  : getFirestore(app);
+function createFirestoreClient(firebaseApp, dbId) {
+  const settings = { experimentalAutoDetectLongPolling: true };
+  try {
+    return dbId
+      ? initializeFirestore(firebaseApp, settings, dbId)
+      : initializeFirestore(firebaseApp, settings);
+  } catch {
+    return dbId
+      ? getFirestore(firebaseApp, dbId)
+      : getFirestore(firebaseApp);
+  }
+}
+
+export const db = createFirestoreClient(app, databaseId);
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });

@@ -1296,6 +1296,18 @@ export default function App() {
             console.error('Failed syncing consumed image credit:', consumeErr);
           });
         }
+        if (currentUser?.uid && result.promptModel) {
+          const promptChars = result.promptChars || calculateExchangeCharCount(trimmed, result.englishPrompt);
+          recordModelUsageInFirestore(result.promptModel, promptChars)
+            .then((updatedQuotaDoc) => {
+              if (updatedQuotaDoc && userIsAdmin) {
+                setAdminQuotaAnalytics(updatedQuotaDoc);
+              }
+            })
+            .catch((quotaSyncErr) => {
+              console.error('Failed syncing image prompt usage counter to Firestore:', quotaSyncErr);
+            });
+        }
         scrollToBottom();
       } catch (err) {
         const rawErrMsg = err instanceof Error && err.message ? err.message : '';
@@ -1382,8 +1394,8 @@ export default function App() {
 
       const usedFallback = Boolean(data?.usedFallback);
       const primaryExhausted = Boolean(data?.primaryCapacityExhausted);
-      const usedPlusPlus = data?.usedTier === SUPER_MODEL_TIER
-        || (!data?.usedTier && !usedFallback && data?.model === GEMINI_HYDROGEN_MODEL_ID);
+      const usedPlusPlus = data?.model === GEMINI_HYDROGEN_MODEL_ID
+        || (!data?.model && data?.usedTier === SUPER_MODEL_TIER);
       const consumedChars = calculateExchangeCharCount(trimmed, replyText);
       setGlobalCapacityExhausted(primaryExhausted || (useFallbackMode && globalCapacityExhausted));
 
@@ -2050,6 +2062,7 @@ export default function App() {
                 <ModelsIcon />
                 <span className="model-dropdown-caption">{t.modelsButtonLabel}:</span>
                 <strong className="model-dropdown-value">{t[activeModelOption.nameKey]}</strong>
+                <span className="model-dropdown-code" dir="ltr">({t[activeModelOption.subtitleKey]})</span>
                 <span className="model-dropdown-chevron" aria-hidden="true">
                   <ChevronDownIcon />
                 </span>
@@ -2088,7 +2101,7 @@ export default function App() {
                         <div className="model-option-header">
                           <div className="model-option-titles">
                             <strong>{t[opt.nameKey]}</strong>
-                            <span className="model-option-subtitle" dir="auto">{t[opt.subtitleKey]}</span>
+                            <span className="model-option-subtitle" dir="ltr">({t[opt.subtitleKey]})</span>
                           </div>
                           {isSelected && (
                             <span className="model-option-check" aria-hidden="true">

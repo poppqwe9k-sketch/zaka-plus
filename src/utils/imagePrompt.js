@@ -66,7 +66,9 @@ export async function generateImageViaApi(prompt, fetchImpl = fetch) {
         imageUrl: data.imageUrl,
         englishPrompt: data.englishPrompt || cleanPrompt,
         seed: data.seed ?? Math.floor(Math.random() * 100000),
-        model: data.model || 'flux'
+        model: data.model || 'flux',
+        promptModel: typeof data.promptModel === 'string' ? data.promptModel : null,
+        promptChars: Number.isFinite(Number(data.promptChars)) ? Math.max(0, Math.floor(Number(data.promptChars))) : 0
       };
     }
   } catch {
