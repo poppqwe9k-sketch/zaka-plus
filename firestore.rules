@@ -63,6 +63,8 @@ service cloud.firestore {
           'remainingCredits',
           'cycleStartedAt',
           'lastResetDate',
+          'hydrogenUsedCount',
+          'hydrogenQuotaDate',
           'totalUsed',
           'visitsCount',
           'createdAt',
@@ -78,6 +80,8 @@ service cloud.firestore {
         && data.remainingCredits is int && data.remainingCredits >= 0 && data.remainingCredits <= 100000
         && data.cycleStartedAt is int && data.cycleStartedAt >= 0
         && data.lastResetDate is string && data.lastResetDate.size() >= 8 && data.lastResetDate.size() <= 20
+        && (!('hydrogenUsedCount' in data) || (data.hydrogenUsedCount is int && data.hydrogenUsedCount >= 0 && data.hydrogenUsedCount <= 100000))
+        && (!('hydrogenQuotaDate' in data) || (data.hydrogenQuotaDate is string && data.hydrogenQuotaDate.size() >= 8 && data.hydrogenQuotaDate.size() <= 20))
         && data.totalUsed is int && data.totalUsed >= 0 && data.totalUsed <= 10000000
         && data.visitsCount is int && data.visitsCount >= 0 && data.visitsCount <= 10000000
         && data.createdAt is timestamp
@@ -173,6 +177,8 @@ service cloud.firestore {
         && incoming().updatedAt == request.time
         && incoming().lastActiveAt == request.time
         && (!('banned' in incoming()) || incoming().banned == false)
+        && (!('hydrogenUsedCount' in incoming()) || incoming().hydrogenUsedCount == 0)
+        && (!('hydrogenQuotaDate' in incoming()) || (incoming().hydrogenQuotaDate is string && incoming().hydrogenQuotaDate.matches('^20[0-9]{2}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$')))
         && (
           isAdmin() || (
             isOwner(uid)
@@ -193,7 +199,7 @@ service cloud.firestore {
         && incoming().updatedAt == request.time
         && (
           (isAdmin()
-            && incoming().diff(existing()).affectedKeys().hasOnly(['plan', 'dailyLimit', 'remainingCredits', 'updatedAt'])
+            && incoming().diff(existing()).affectedKeys().hasOnly(['plan', 'dailyLimit', 'remainingCredits', 'hydrogenUsedCount', 'updatedAt'])
           ) ||
           (isAdmin()
             && !isOwner(uid)
@@ -207,19 +213,45 @@ service cloud.firestore {
             && incoming().dailyLimit == existing().dailyLimit
             && (!('banned' in incoming()) || (('banned' in existing()) ? incoming().banned == existing().banned : incoming().banned == false))
             && (
-              // Action 1: Consume 1 credit after real AI response
-              (incoming().diff(existing()).affectedKeys().hasOnly(['remainingCredits', 'totalUsed', 'updatedAt', 'lastActiveAt'])
-                && existing().remainingCredits >= 1
-                && incoming().remainingCredits == existing().remainingCredits - 1
+              // Action 1: Consume 1 credit and increment hydrogenUsedCount after real AI response
+              (incoming().diff(existing()).affectedKeys().hasOnly(['remainingCredits', 'totalUsed', 'hydrogenUsedCount', 'hydrogenQuotaDate', 'lastResetDate', 'cycleStartedAt', 'updatedAt', 'lastActiveAt'])
                 && incoming().totalUsed == existing().totalUsed + 1
                 && incoming().lastActiveAt == request.time
+                && incoming().hydrogenUsedCount is int
+                && incoming().hydrogenQuotaDate is string
+                && incoming().hydrogenQuotaDate.matches('^20[0-9]{2}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$')
+                && (
+                  (
+                    (('hydrogenQuotaDate' in existing()) ? incoming().hydrogenQuotaDate == existing().hydrogenQuotaDate : incoming().lastResetDate == existing().lastResetDate)
+                    && incoming().lastResetDate == existing().lastResetDate
+                    && incoming().cycleStartedAt == existing().cycleStartedAt
+                    && existing().remainingCredits >= 1
+                    && incoming().remainingCredits == existing().remainingCredits - 1
+                    && (
+                      ('hydrogenUsedCount' in existing())
+                        ? incoming().hydrogenUsedCount == existing().hydrogenUsedCount + 1
+                        : (incoming().hydrogenUsedCount >= 1 && incoming().hydrogenUsedCount <= existing().dailyLimit)
+                    )
+                  ) ||
+                  (
+                    (('hydrogenQuotaDate' in existing()) ? incoming().hydrogenQuotaDate != existing().hydrogenQuotaDate : incoming().lastResetDate != existing().lastResetDate)
+                    && incoming().lastResetDate == incoming().hydrogenQuotaDate
+                    && incoming().lastResetDate != existing().lastResetDate
+                    && incoming().hydrogenUsedCount == 1
+                    && incoming().cycleStartedAt >= existing().cycleStartedAt
+                    && incoming().cycleStartedAt <= request.time.toMillis() + 300000
+                    && incoming().remainingCredits == ((existing().remainingCredits > existing().dailyLimit ? existing().remainingCredits : existing().dailyLimit) - 1)
+                  )
+                )
               ) ||
               // Action 2: Strict 24h cycle renewal back to dailyLimit
-              (incoming().diff(existing()).affectedKeys().hasOnly(['remainingCredits', 'cycleStartedAt', 'lastResetDate', 'updatedAt', 'lastActiveAt'])
+              (incoming().diff(existing()).affectedKeys().hasOnly(['remainingCredits', 'cycleStartedAt', 'lastResetDate', 'hydrogenUsedCount', 'hydrogenQuotaDate', 'updatedAt', 'lastActiveAt'])
                 && incoming().cycleStartedAt - existing().cycleStartedAt >= 86400000
                 && incoming().cycleStartedAt <= request.time.toMillis() + 300000
                 && incoming().remainingCredits >= existing().dailyLimit
                 && incoming().remainingCredits <= (existing().remainingCredits > existing().dailyLimit ? existing().remainingCredits : existing().dailyLimit)
+                && (!('hydrogenUsedCount' in incoming()) || incoming().hydrogenUsedCount == 0)
+                && (!('hydrogenQuotaDate' in incoming()) || incoming().hydrogenQuotaDate == incoming().lastResetDate)
                 && incoming().lastActiveAt == request.time
               ) ||
               // Action 3: Record session visit & displayName sync
@@ -227,6 +259,42 @@ service cloud.firestore {
                 && incoming().visitsCount >= existing().visitsCount
                 && incoming().visitsCount <= existing().visitsCount + 1
                 && incoming().lastActiveAt == request.time
+              ) ||
+              // Action 4: Daily YYYY-MM-DD hydrogen quota reset / schema initialization
+              (incoming().diff(existing()).affectedKeys().hasOnly(['hydrogenUsedCount', 'hydrogenQuotaDate', 'remainingCredits', 'lastResetDate', 'cycleStartedAt', 'updatedAt', 'lastActiveAt'])
+                && incoming().lastActiveAt == request.time
+                && incoming().hydrogenQuotaDate is string
+                && incoming().hydrogenQuotaDate.matches('^20[0-9]{2}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$')
+                && (
+                  (
+                    incoming().lastResetDate == incoming().hydrogenQuotaDate
+                    && incoming().lastResetDate != existing().lastResetDate
+                    && (!('hydrogenQuotaDate' in existing()) || incoming().hydrogenQuotaDate != existing().hydrogenQuotaDate)
+                    && incoming().hydrogenUsedCount == 0
+                    && incoming().cycleStartedAt >= existing().cycleStartedAt
+                    && incoming().cycleStartedAt <= request.time.toMillis() + 300000
+                    && incoming().remainingCredits >= existing().remainingCredits
+                    && incoming().remainingCredits <= (existing().remainingCredits > existing().dailyLimit ? existing().remainingCredits : existing().dailyLimit)
+                  ) ||
+                  (
+                    (!('hydrogenQuotaDate' in existing()) || !('hydrogenUsedCount' in existing()))
+                    && incoming().lastResetDate == existing().lastResetDate
+                    && incoming().hydrogenQuotaDate == existing().lastResetDate
+                    && incoming().cycleStartedAt == existing().cycleStartedAt
+                    && incoming().remainingCredits == existing().remainingCredits
+                    && incoming().hydrogenUsedCount >= 0
+                    && incoming().hydrogenUsedCount <= existing().dailyLimit
+                  ) ||
+                  (
+                    'hydrogenQuotaDate' in existing()
+                    && incoming().hydrogenQuotaDate != existing().hydrogenQuotaDate
+                    && incoming().lastResetDate == existing().lastResetDate
+                    && incoming().hydrogenQuotaDate == existing().lastResetDate
+                    && incoming().cycleStartedAt == existing().cycleStartedAt
+                    && incoming().remainingCredits == existing().remainingCredits
+                    && incoming().hydrogenUsedCount == 0
+                  )
+                )
               )
             )
           )

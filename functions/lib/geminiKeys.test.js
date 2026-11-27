@@ -244,3 +244,63 @@ test('quarantines keys returning 401 ACCESS_TOKEN_TYPE_UNSUPPORTED and rotates s
     console.warn = origWarn;
   }
 });
+
+test('cleans quotes, newlines, blank lines, JSON arrays, and Bearer prefixes across GEMINI_API_KEY and GEMINI_KEYS', () => {
+  resetKeyRotationForTests();
+  const k1 = 'AIzaSyCleanKeyOne123456789012345678';
+  const k2 = 'AIzaSyCleanKeyTwo123456789012345678';
+  const k3 = 'AIzaSyCleanKeyThree1234567890123456';
+  const k4 = 'AIzaSyCleanKeyFour12345678901234567';
+  const keys = getGeminiApiKeys({
+    GEMINI_KEY_1: `  "'${k1}'" \n `,
+    GEMINI_API_KEY: `\n\n "${k2}" \n\n  \n '${k3}' ;`,
+    GEMINI_KEYS: JSON.stringify([`  Bearer ${k4}  `, '', 'YOUR_API_KEY'])
+  });
+  assert.deepEqual(keys, [k1, k4, k2, k3]);
+});
+
+test('rotates automatically on 400 API key not valid errors and throws clear Arabic error when all keys fail auth', async () => {
+  resetKeyRotationForTests();
+  const bad1 = 'AIzaSyBad400KeyOne12345678901234567';
+  const bad2 = 'AIzaSyBad400KeyTwo12345678901234567';
+  const good = 'AIzaSyGoodKeyThree1234567890123456';
+
+  const tried = [];
+  const res = await runWithRotatedGeminiKeys(
+    { GEMINI_KEY_1: bad1, GEMINI_KEY_2: bad2, GEMINI_KEY_3: good },
+    async ({ apiKey }) => {
+      tried.push(apiKey);
+      if (apiKey !== good) {
+        const err = new Error('{"error":{"code":400,"message":"API key not valid. Please pass a valid API key.","status":"INVALID_ARGUMENT"}}');
+        err.status = 400;
+        throw err;
+      }
+      return { ok: true, apiKey };
+    },
+    { model: 'gemini-3.5-flash-lite' }
+  );
+
+  assert.deepEqual(tried, [bad1, bad2, good]);
+  assert.equal(res.ok, true);
+  assert.equal(res.apiKey, good);
+
+  resetKeyRotationForTests();
+  await assert.rejects(
+    runWithRotatedGeminiKeys(
+      { GEMINI_KEY_1: bad1, GEMINI_KEY_2: bad2 },
+      async () => {
+        const err = new Error('API key not valid. Please pass a valid API key.');
+        err.status = 400;
+        throw err;
+      },
+      { model: 'gemini-3.5-flash-lite' }
+    ),
+    (err) => {
+      assert.equal(err.allKeysAuthInvalid, true);
+      assert.equal(err.status, 400);
+      assert.match(err.message, /مفاتيح API/);
+      assert.equal(/GEMINI_KEY|GEMINI_KEYS/i.test(err.message), false);
+      return true;
+    }
+  );
+});

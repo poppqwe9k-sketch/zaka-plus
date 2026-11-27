@@ -48,6 +48,16 @@
           "minLength": 8,
           "maxLength": 20
         },
+        "hydrogenUsedCount": {
+          "type": "integer",
+          "description": "Daily gemini-4-hydrogen attempts used on hydrogenQuotaDate (default 0, max 3 for free accounts)."
+        },
+        "hydrogenQuotaDate": {
+          "type": "string",
+          "description": "Local YYYY-MM-DD date string for the active daily gemini-4-hydrogen quota.",
+          "minLength": 8,
+          "maxLength": 20
+        },
         "totalUsed": {
           "type": "integer",
           "description": "Total AI messages consumed by the user."

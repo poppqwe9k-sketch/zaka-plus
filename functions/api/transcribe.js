@@ -1,5 +1,6 @@
 import {
   createGeminiClient,
+  getErrorStatus,
   runWithRotatedGeminiKeys,
   sanitizeSecretFromErrorMessage
 } from '../lib/geminiKeys.js';
@@ -66,8 +67,13 @@ export async function onRequestPost({ request, env }) {
     return json({ text: transcript, model: TRANSCRIBE_MODEL_ID });
   } catch (error) {
     const rawMsg = error instanceof Error ? error.message : 'تعذر تفريغ الصوت حالياً.';
+    const rawStatus = getErrorStatus(error);
+    const status = rawStatus === 400 || rawStatus === 401 || rawStatus === 403 || rawStatus === 429
+      ? rawStatus
+      : 502;
     return json({
+      ok: false,
       error: sanitizeSecretFromErrorMessage(rawMsg)
-    }, 502);
+    }, status);
   }
 }

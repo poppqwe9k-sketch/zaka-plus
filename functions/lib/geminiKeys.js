@@ -10,6 +10,8 @@ export const GEMINI_KEY_COUNT = 19;
 export const DAILY_QUOTA_PER_KEY = 20;
 export const PLUS_QUOTA_PER_KEY = 1000;
 export const QUOTA_CYCLE_MS = 24 * 60 * 60 * 1000;
+export const WORKER_NO_KEYS_ERROR_MESSAGE = 'لا توجد مفاتيح API صالحة مهيأة في إعدادات الـ Worker حالياً. يرجى مراجعة مفاتيح API في أسرار الـ Worker.';
+export const WORKER_INVALID_KEYS_ERROR_MESSAGE = 'مفاتيح API في إعدادات الـ Worker غير صالحة أو تحتاج مراجعة. تأكد من صحة المفاتيح وعدم انتهاء صلاحيتها أو تقييدها.';
 const QUOTA_COOLDOWN_MS = 15 * 1000;
 const AUTH_COOLDOWN_MS = 10 * 60 * 1000;
 const GOOGLE_API_KEY_PATTERN = /^AIza[0-9A-Za-z_-]{20,}$/;
@@ -48,11 +50,22 @@ function getCooldownMapKey(apiKey, model = '') {
 
 function normalizeRawKey(raw) {
   if (typeof raw !== 'string') return '';
-  const cleaned = raw
-    .trim()
-    .replace(/^["'`]+|["'`]+$/g, '')
+  let cleaned = raw.replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
+  for (let pass = 0; pass < 3; pass += 1) {
+    cleaned = cleaned
+      .replace(/^(?:\\["']|["'`])+/, '')
+      .replace(/(?:\\["']|["'`])+$/, '')
+      .trim();
+  }
+  cleaned = cleaned
     .replace(/^(?:bearer|x-goog-api-key)\s*:?\s+/i, '')
     .trim();
+  for (let pass = 0; pass < 2; pass += 1) {
+    cleaned = cleaned
+      .replace(/^(?:\\["']|["'`])+/, '')
+      .replace(/(?:\\["']|["'`])+$/, '')
+      .trim();
+  }
   if (!cleaned || /\s/.test(cleaned)) return '';
   const lower = cleaned.toLowerCase();
   if (PLACEHOLDER_KEYS.has(lower)) return '';
@@ -60,6 +73,53 @@ function normalizeRawKey(raw) {
     return '';
   }
   return cleaned;
+}
+
+export function extractKeysFromRawValue(raw) {
+  if (Array.isArray(raw)) {
+    return raw.flatMap((entry) => extractKeysFromRawValue(entry));
+  }
+  if (typeof raw !== 'string') return [];
+  const trimmed = raw.replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
+  if (!trimmed) return [];
+
+  if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) {
+        return parsed.flatMap((entry) => extractKeysFromRawValue(entry));
+      }
+    } catch {
+      // Fall through to delimiter splitting.
+    }
+  }
+
+  const strippedBrackets = trimmed.replace(/^\[+|\]+$/g, '').trim();
+  if (!strippedBrackets) return [];
+
+  const lineOrCommaParts = strippedBrackets
+    .split(/[,\n;\r]+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  const results = [];
+  for (const part of lineOrCommaParts) {
+    const direct = normalizeRawKey(part);
+    if (direct) {
+      results.push(direct);
+      continue;
+    }
+    const withoutPrefix = part
+      .replace(/^["'`]+|["'`]+$/g, '')
+      .replace(/^(?:bearer|x-goog-api-key)\s*:?\s+/i, '')
+      .trim();
+    const spaceTokens = withoutPrefix.split(/\s+/).filter(Boolean);
+    for (const token of spaceTokens) {
+      const normalized = normalizeRawKey(token);
+      if (normalized) results.push(normalized);
+    }
+  }
+  return results;
 }
 
 export function getGeminiApiKeys(env) {
@@ -72,7 +132,7 @@ export function getGeminiApiKeys(env) {
 
   // Explicit static property reads (no dynamic 'GEMINI_KEY_' + i indexing)
   // so every bundler and server runtime resolves all keys reliably.
-  const rawSingleKeys = [
+  const rawCandidateValues = [
     source.GEMINI_KEY ?? envFallback.GEMINI_KEY,
     source.GEMINI_KEY_1 ?? envFallback.GEMINI_KEY_1,
     source.GEMINI_KEY_2 ?? envFallback.GEMINI_KEY_2,
@@ -92,33 +152,34 @@ export function getGeminiApiKeys(env) {
     source.GEMINI_KEY_16 ?? envFallback.GEMINI_KEY_16,
     source.GEMINI_KEY_17 ?? envFallback.GEMINI_KEY_17,
     source.GEMINI_KEY_18 ?? envFallback.GEMINI_KEY_18,
-    source.GEMINI_KEY_19 ?? envFallback.GEMINI_KEY_19
-  ].filter(Boolean);
-
-  const rawMultiKeys = [
+    source.GEMINI_KEY_19 ?? envFallback.GEMINI_KEY_19,
     source.GEMINI_KEYS ?? envFallback.GEMINI_KEYS,
-    source.GEMINI_API_KEYS ?? envFallback.GEMINI_API_KEYS
-  ]
-    .filter((v) => typeof v === 'string' && v.trim())
-    .flatMap((v) => v.split(/[,\s]+/));
-
-  const modeCandidate = normalizeRawKey(source.GEMINI_MODE ?? envFallback.GEMINI_MODE);
-  const modeKeyIfApiKey = /^AIza[0-9A-Za-z_-]{20,}$/.test(modeCandidate) ? [modeCandidate] : [];
-
-  const fallbackSingleKey = [
-    source.GEMINI_API_KEY ?? envFallback.GEMINI_API_KEY
+    source.GEMINI_API_KEYS ?? envFallback.GEMINI_API_KEYS,
+    source.GEMINI_API_KEY ?? envFallback.GEMINI_API_KEY,
+    source.GEMINI_API_KEY_1 ?? envFallback.GEMINI_API_KEY_1,
+    source.GEMINI_API_KEY_2 ?? envFallback.GEMINI_API_KEY_2,
+    source.GEMINI_API_KEY_3 ?? envFallback.GEMINI_API_KEY_3,
+    source.GEMINI_API_KEY_4 ?? envFallback.GEMINI_API_KEY_4,
+    source.GEMINI_API_KEY_5 ?? envFallback.GEMINI_API_KEY_5,
+    source.GOOGLE_API_KEY ?? envFallback.GOOGLE_API_KEY,
+    source.GOOGLE_GENERATIVE_AI_API_KEY ?? envFallback.GOOGLE_GENERATIVE_AI_API_KEY,
+    source.GOOGLE_GEMINI_API_KEY ?? envFallback.GOOGLE_GEMINI_API_KEY
   ].filter(Boolean);
 
-  // Also capture any extra GEMINI_*KEY* secrets (e.g. GEMINI_KEY_20, GEMINI_BACKUP_KEY)
-  const extraNamedKeys = [];
+  const modeCandidates = extractKeysFromRawValue(source.GEMINI_MODE ?? envFallback.GEMINI_MODE)
+    .filter((k) => GOOGLE_API_KEY_PATTERN.test(k));
+
+  // Also capture any extra GEMINI_*KEY* or GOOGLE_*KEY* secrets (e.g. GEMINI_KEY_20, GEMINI_BACKUP_KEY)
+  const extraNamedValues = [];
   for (const obj of [source, envFallback]) {
     if (!obj || typeof obj !== 'object') continue;
     for (const [envName, envVal] of Object.entries(obj)) {
       if (envName === 'GEMINI_KEYS' || envName === 'GEMINI_API_KEYS') continue;
-      if (/^GEMINI_.*(?:COUNT|INDEX|MODE|MODEL|ENABLED|URL|ENDPOINT|LIMIT|TIMEOUT)$/i.test(envName)) continue;
-      if (!/^GEMINI_.*KEY/i.test(envName) && !/^GEMINI_?\d+$/i.test(envName)) continue;
+      if (/FIREBASE|MAPS|CLOUD|STRIPE|OAUTH|VITE_/i.test(envName)) continue;
+      if (/^(?:GEMINI|GOOGLE)_.*(?:COUNT|INDEX|MODE|MODEL|ENABLED|URL|ENDPOINT|LIMIT|TIMEOUT|HOST|DOMAIN|PROJECT|ID)$/i.test(envName)) continue;
+      if (!/^(?:GEMINI|GOOGLE)_.*KEY/i.test(envName) && !/^GEMINI_?\d+$/i.test(envName)) continue;
       if (typeof envVal === 'string' && envVal.trim()) {
-        extraNamedKeys.push(envVal);
+        extraNamedValues.push(envVal);
       }
     }
   }
@@ -126,11 +187,13 @@ export function getGeminiApiKeys(env) {
   const keys = [];
   const seen = new Set();
 
-  for (const raw of [...rawSingleKeys, ...rawMultiKeys, ...modeKeyIfApiKey, ...fallbackSingleKey, ...extraNamedKeys]) {
-    const trimmed = normalizeRawKey(raw);
-    if (!trimmed || seen.has(trimmed)) continue;
-    seen.add(trimmed);
-    keys.push(trimmed);
+  for (const rawVal of [...rawCandidateValues, ...modeCandidates, ...extraNamedValues]) {
+    const extracted = extractKeysFromRawValue(rawVal);
+    for (const cleanKey of extracted) {
+      if (!cleanKey || seen.has(cleanKey)) continue;
+      seen.add(cleanKey);
+      keys.push(cleanKey);
+    }
   }
 
   // Prioritize valid-format Google AIza... keys first, while keeping any other configured keys as fallback.
@@ -139,30 +202,57 @@ export function getGeminiApiKeys(env) {
   return googleKeys.length > 0 ? [...googleKeys, ...otherKeys] : keys;
 }
 
-function getErrorStatus(error) {
-  if (typeof error?.status === 'number') return error.status;
-  if (typeof error?.statusCode === 'number') return error.statusCode;
-  if (typeof error?.code === 'number') return error.code;
+export function getErrorStatus(error) {
+  if (typeof error?.status === 'number' && error.status > 0) return error.status;
+  if (typeof error?.statusCode === 'number' && error.statusCode > 0) return error.statusCode;
+  if (typeof error?.code === 'number' && error.code > 0) return error.code;
+  if (typeof error?.error?.code === 'number' && error.error.code > 0) return error.error.code;
+  if (typeof error?.message === 'string' && error.message.trim().startsWith('{')) {
+    try {
+      const parsed = JSON.parse(error.message);
+      if (typeof parsed?.error?.code === 'number' && parsed.error.code > 0) {
+        return parsed.error.code;
+      }
+    } catch {
+      // Ignore JSON parse failure.
+    }
+  }
   return 0;
+}
+
+function getCombinedErrorText(error) {
+  const parts = [
+    error instanceof Error ? error.message : String(error || ''),
+    typeof error?.error?.message === 'string' ? error.error.message : '',
+    typeof error?.error?.status === 'string' ? error.error.status : '',
+    Array.isArray(error?.error?.details) ? JSON.stringify(error.error.details) : ''
+  ];
+  return parts.filter(Boolean).join(' ').toLowerCase();
 }
 
 export function isAuthKeyError(error) {
   const status = getErrorStatus(error);
   if (status === 401 || status === 403) return true;
-  const msg = (error instanceof Error ? error.message : String(error || '')).toLowerCase();
-  return (
+  const msg = getCombinedErrorText(error);
+  const hasAuthPattern = (
     msg.includes('api_key_invalid')
     || msg.includes('api key not valid')
+    || msg.includes('api key invalid')
+    || msg.includes('invalid api key')
+    || msg.includes('api key expired')
+    || msg.includes('key_invalid')
     || msg.includes('access_token_type_unsupported')
     || msg.includes('unauthenticated')
     || msg.includes('permission_denied')
   );
+  if (hasAuthPattern) return true;
+  return status === 400 && (msg.includes('api key') || msg.includes('api_key'));
 }
 
 export function isQuotaExhaustedError(error) {
   const status = getErrorStatus(error);
   if (status === 429) return true;
-  const msg = (error instanceof Error ? error.message : String(error || '')).toLowerCase();
+  const msg = getCombinedErrorText(error);
   return (
     msg.includes('quota')
     || msg.includes('resource_exhausted')
@@ -176,7 +266,15 @@ export function isQuotaExhaustedError(error) {
 }
 
 export function isKeyRotationEligibleError(error) {
-  return isAuthKeyError(error) || isQuotaExhaustedError(error);
+  const status = getErrorStatus(error);
+  return (
+    status === 400
+    || status === 401
+    || status === 403
+    || status === 429
+    || isAuthKeyError(error)
+    || isQuotaExhaustedError(error)
+  );
 }
 
 function getModelExhaustedMap(model = 'gemini-4-hydrogen', now = Date.now()) {
@@ -344,13 +442,20 @@ export function sanitizeSecretFromErrorMessage(message) {
 export async function runWithRotatedGeminiKeys(env, taskFn, { model = '', now = Date.now() } = {}) {
   const allKeys = getGeminiApiKeys(env);
   if (allKeys.length === 0) {
-    throw new Error('خدمة الذكاء الاصطناعي غير مهيأة حالياً على الخادم.');
+    const err = new Error(WORKER_NO_KEYS_ERROR_MESSAGE);
+    err.status = 502;
+    err.allKeysAuthInvalid = true;
+    throw err;
   }
 
   const rotatedKeys = rotateGeminiKeys(env, model, now);
-  const keysToTry = rotatedKeys;
+  const nonInvalidKeys = rotatedKeys.filter((k) => !isKnownInvalidAuthKey(k));
+  const keysToTry = nonInvalidKeys.length > 0 ? nonInvalidKeys : rotatedKeys;
 
   let lastError;
+  let lastNonAuthError = null;
+  let authInvalidCount = 0;
+
   for (let index = 0; index < keysToTry.length; index += 1) {
     const apiKey = keysToTry[index];
     try {
@@ -364,18 +469,31 @@ export async function runWithRotatedGeminiKeys(env, taskFn, { model = '', now = 
     } catch (error) {
       lastError = error;
       const status = getErrorStatus(error);
+      const authError = isAuthKeyError(error);
+      if (authError) {
+        authInvalidCount += 1;
+      } else {
+        lastNonAuthError = error;
+      }
       const canRotate = isKeyRotationEligibleError(error) || status === 503 || status === 500 || status === 502 || status === 504;
       if (isKeyRotationEligibleError(error)) {
         markGeminiKeyCooldown(apiKey, error, model, Date.now());
       }
-      if (!canRotate && index === keysToTry.length - 1) {
-        throw error;
+      if (index < keysToTry.length - 1 && (canRotate || authError)) {
+        continue;
       }
       if (index === keysToTry.length - 1) {
-        throw error;
+        if (authInvalidCount >= keysToTry.length && !lastNonAuthError) {
+          const invalidErr = new Error(WORKER_INVALID_KEYS_ERROR_MESSAGE);
+          invalidErr.status = status === 401 || status === 403 ? status : 400;
+          invalidErr.allKeysAuthInvalid = true;
+          invalidErr.triedKeys = keysToTry.length;
+          throw invalidErr;
+        }
+        throw lastNonAuthError || error;
       }
     }
   }
 
-  throw lastError || new Error('تعذر الاتصال بنموذج Gemini عبر المفاتيح المتاحة.');
+  throw lastNonAuthError || lastError || new Error(WORKER_INVALID_KEYS_ERROR_MESSAGE);
 }

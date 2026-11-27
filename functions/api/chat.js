@@ -8,9 +8,12 @@ import {
 } from '../../src/shared/modelTiers.js';
 import {
   PLUS_QUOTA_PER_KEY,
+  WORKER_INVALID_KEYS_ERROR_MESSAGE,
+  WORKER_NO_KEYS_ERROR_MESSAGE,
   clearGeminiKeyFailureState,
   clearModelQuotaExhausted,
   createGeminiClient,
+  getErrorStatus,
   getGeminiApiKeys,
   getServerQuotaSnapshot,
   isAuthKeyError,
@@ -225,7 +228,10 @@ export async function runGeminiTier(env, messages, attachments, systemInstructio
     try {
       return await runGeminiTierCore(env, messages, attachments, systemInstruction, tierConfig, generateFn);
     } catch (searchPassError) {
-      const status = typeof searchPassError?.status === 'number' ? searchPassError.status : 0;
+      if (searchPassError?.allKeysAuthInvalid) {
+        throw searchPassError;
+      }
+      const status = getErrorStatus(searchPassError);
       if (isQuotaExhaustedError(searchPassError) || status === 400 || status === 403 || status === 429) {
         const modelsToClear = [
           tierConfig?.model,
@@ -253,7 +259,10 @@ async function runGeminiTierCore(env, messages, attachments, systemInstruction, 
   const isCustomGenerateFn = typeof generateFn === 'function';
   const configuredKeys = getGeminiApiKeys(env);
   if (!isCustomGenerateFn && configuredKeys.length === 0) {
-    throw new Error('خدمة الذكاء الاصطناعي غير مهيأة حالياً على الخادم.');
+    const err = new Error(WORKER_NO_KEYS_ERROR_MESSAGE);
+    err.status = 502;
+    err.allKeysAuthInvalid = true;
+    throw err;
   }
 
   const contents = messages.map(({ role, content }) => ({
@@ -373,7 +382,7 @@ async function runGeminiTierCore(env, messages, attachments, systemInstruction, 
             lastNonAuthError = error;
           }
 
-          const status = typeof error?.status === 'number' ? error.status : 0;
+          const status = getErrorStatus(error);
 
           if (isQuotaExhaustedError(error) && activeKey) {
             modelQuota429Keys.add(activeKey);
@@ -388,6 +397,10 @@ async function runGeminiTierCore(env, messages, attachments, systemInstruction, 
           }
 
           if (isUnavailableModelError(error)) {
+            break;
+          }
+
+          if (hasNextKey && (isKeyRotationEligibleError(error) || status === 500 || status === 502 || status === 503 || status === 504)) {
             break;
           }
 
@@ -417,9 +430,19 @@ async function runGeminiTierCore(env, messages, attachments, systemInstruction, 
     }
 
     const hasNextFallbackModel = modelIndex < modelsToTry.length - 1;
-    const allKeysAuthInvalid = modelAuthInvalidKeys.size >= activeKeyPool.length && modelQuota429Keys.size === 0;
+    const allKeysAuthInvalid = modelAuthInvalidKeys.size >= activeKeyPool.length && modelQuota429Keys.size === 0 && !lastNonAuthError;
     if (hasNextFallbackModel && (!allKeysAuthInvalid || isUnavailableModelError(modelError))) {
       continue;
+    }
+
+    if (allKeysAuthInvalid && !isUnavailableModelError(modelError)) {
+      const authStatus = getErrorStatus(modelError);
+      const authErr = new Error(WORKER_INVALID_KEYS_ERROR_MESSAGE);
+      authErr.status = authStatus === 401 || authStatus === 403 ? authStatus : 400;
+      authErr.allKeysAuthInvalid = true;
+      authErr.triedKeys = lastTriedKeysCount;
+      authErr.quotaMeta = buildPrimaryQuotaMeta(false);
+      throw authErr;
     }
 
     if (modelError && typeof modelError === 'object') {
@@ -531,10 +554,13 @@ export async function handleChat(request, env, generateFn = null) {
       plusQuotaMeta
     });
   } catch (error) {
-    const rawStatus = typeof error?.status === 'number' && error.status >= 400 ? error.status : 502;
+    const parsedStatus = getErrorStatus(error);
+    const rawStatus = parsedStatus >= 400 ? parsedStatus : 502;
     const isGlobalQuota = rawStatus === 429 || isQuotaExhaustedError(error);
     const status = isGlobalQuota ? 429 : rawStatus;
-    const message = formatGeminiErrorMessage(error);
+    const message = error?.allKeysAuthInvalid
+      ? (error.message || WORKER_INVALID_KEYS_ERROR_MESSAGE)
+      : formatGeminiErrorMessage(error);
     const triedKeys = typeof error?.triedKeys === 'number' ? error.triedKeys : undefined;
     const quotaMeta = error?.quotaMeta || {
       ...getServerQuotaSnapshot(env, tierConfig.model),
@@ -546,10 +572,12 @@ export async function handleChat(request, env, generateFn = null) {
     };
     const friendly429 = 'اكتملت السعة اليومية الكلية للتطبيق مؤقتاً، وسيتم تجديد السعة تلقائياً خلال 24 ساعة.';
     return json({
+      ok: false,
       error: isGlobalQuota
         ? friendly429
         : (triedKeys && triedKeys > 1 ? `${message} (بعد تجربة ${triedKeys} مفاتيح)` : message),
       ...(isGlobalQuota ? { errorCode: 'GLOBAL_QUOTA_EXHAUSTED' } : {}),
+      ...(error?.allKeysAuthInvalid ? { errorCode: 'WORKER_KEYS_INVALID' } : {}),
       triedKeys,
       model: tierConfig.model,
       tierId: tierConfig.tierId,

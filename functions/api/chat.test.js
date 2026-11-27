@@ -674,3 +674,72 @@ test('routes plus-max to gemini-3.5-flash-lite with fallbackToPlus when plusPlus
   assert.equal(upgradedModel, 'gemini-4-hydrogen');
 });
 
+test('rotates automatically on 400 API key not valid for both gemini-4-hydrogen and gemini-3.5-flash-lite', async () => {
+  const { resetKeyRotationForTests } = await import('../lib/geminiKeys.js');
+  resetKeyRotationForTests();
+
+  const env = {
+    GEMINI_KEY_1: ' "AIzaSyBad400KeyOne12345678901234567" ',
+    GEMINI_KEY_2: 'AIzaSyValidKeyTwo123456789012345678'
+  };
+
+  for (const selectedModel of ['plus-max', 'plus']) {
+    resetKeyRotationForTests();
+    const seenKeys = [];
+    const req = new Request('http://localhost:3000/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages: [{ role: 'user', content: 'مرحبا' }], selectedModel })
+    });
+    const res = await onRequestPost({
+      request: req,
+      env,
+      generateFn: async ({ apiKey }) => {
+        seenKeys.push(apiKey);
+        if (apiKey.includes('Bad400')) {
+          const err = new Error('API key not valid. Please pass a valid API key.');
+          err.status = 400;
+          throw err;
+        }
+        return { text: 'تم الرد بنجاح بعد تدوير المفتاح' };
+      }
+    });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.ok, true);
+    assert.equal(body.reply, 'تم الرد بنجاح بعد تدوير المفتاح');
+    assert.equal(seenKeys.length, 2);
+  }
+});
+
+test('returns clear Arabic error without exposing env names when all Worker API keys fail with 400 API key not valid', async () => {
+  const { resetKeyRotationForTests } = await import('../lib/geminiKeys.js');
+  resetKeyRotationForTests();
+
+  const env = {
+    GEMINI_KEY_1: 'AIzaSyInvalidOne1234567890123456789',
+    GEMINI_KEY_2: 'AIzaSyInvalidTwo1234567890123456789'
+  };
+  const req = new Request('http://localhost:3000/api/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ messages: [{ role: 'user', content: 'اختبار' }], selectedModel: 'plus-max' })
+  });
+  const res = await onRequestPost({
+    request: req,
+    env,
+    generateFn: async () => {
+      const err = new Error('API key not valid. Please pass a valid API key.');
+      err.status = 400;
+      throw err;
+    }
+  });
+  assert.equal(res.status, 400);
+  const body = await res.json();
+  assert.equal(body.ok, false);
+  assert.equal(body.errorCode, 'WORKER_KEYS_INVALID');
+  assert.match(body.error, /مفاتيح API/);
+  assert.equal(/GEMINI_KEY|GEMINI_KEYS/i.test(body.error), false);
+});
+
+

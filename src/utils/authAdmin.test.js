@@ -58,6 +58,8 @@ test('initializes new account profile with 3 daily free messages and free plan',
   assert.equal(profile.visitsCount, 1);
   assert.equal(profile.cycleStartedAt, now);
   assert.equal(profile.lastResetDate, '2026-11-23');
+  assert.equal(profile.hydrogenUsedCount, 0);
+  assert.equal(profile.hydrogenQuotaDate, '2026-11-23');
   assert.equal(profile.banned, false);
 });
 

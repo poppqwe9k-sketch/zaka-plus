@@ -27,6 +27,11 @@ import {
 } from '../utils/authAdmin.js';
 import { getLocalDateKey } from '../utils/credits.js';
 import {
+  doesHydrogenQuotaNeedReset,
+  getLocalCalendarDateString,
+  getProfileHydrogenQuotaState
+} from '../utils/hydrogenQuota.js';
+import {
   getPacificCycleStartMs,
   getPacificDateKey,
   isPacificCycleExpired
@@ -139,23 +144,18 @@ export async function syncUserProfileOnSignIn(firebaseUser, options = {}) {
   let updatedSnapshot = { ...existing };
   const dailyLimit = clampDailyLimit(existing.dailyLimit);
   const currentRemaining = clampCredits(existing.remainingCredits, dailyLimit);
+  const needsDailyReset = doesHydrogenQuotaNeedReset(existing, todayKey);
+  const cycleExpired = isUserProfileCycleExpired(existing, now);
 
-  if (isUserProfileCycleExpired(existing, now)) {
-    const renewedCredits = Math.max(dailyLimit, currentRemaining);
+  if (needsDailyReset || cycleExpired) {
     try {
-      await updateDoc(userRef, {
-        remainingCredits: renewedCredits,
-        cycleStartedAt: now,
-        lastResetDate: todayKey,
-        updatedAt: serverTimestamp(),
-        lastActiveAt: serverTimestamp()
-      });
-      updatedSnapshot = {
-        ...updatedSnapshot,
-        remainingCredits: renewedCredits,
-        cycleStartedAt: now,
-        lastResetDate: todayKey
-      };
+      const synced = await syncDailyHydrogenQuotaInFirestore(uid, existing, { forceCycleReset: cycleExpired });
+      if (synced) {
+        updatedSnapshot = {
+          ...updatedSnapshot,
+          ...synced
+        };
+      }
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, path);
     }
@@ -230,18 +230,127 @@ export function subscribeUserProfile(uid, onData, onError, onMissing) {
   );
 }
 
-export async function consumeUserCreditInFirestore(uid, currentProfile) {
-  if (!uid || !currentProfile) return;
-  const currentRemaining = clampCredits(currentProfile.remainingCredits, 0);
-  if (currentRemaining <= 0) return;
+export async function syncDailyHydrogenQuotaInFirestore(uid, currentProfile, { forceCycleReset = false } = {}) {
+  if (!uid || !currentProfile || currentProfile.banned === true) return null;
+  const now = Date.now();
+  const todayKey = getLocalCalendarDateString(new Date(now));
+  const needsReset = doesHydrogenQuotaNeedReset(currentProfile, todayKey);
+  const cycleExpired = forceCycleReset || isUserProfileCycleExpired(currentProfile, now);
+  if (!needsReset && !cycleExpired) return null;
 
+  const dailyLimit = clampDailyLimit(currentProfile.dailyLimit);
+  const currentRemaining = clampCredits(currentProfile.remainingCredits, dailyLimit);
+  const existingLastReset = typeof currentProfile.lastResetDate === 'string' ? currentProfile.lastResetDate.trim() : '';
+  const hasQuotaDate = typeof currentProfile.hydrogenQuotaDate === 'string' && Boolean(currentProfile.hydrogenQuotaDate.trim());
+  const existingQuotaDate = hasQuotaDate ? currentProfile.hydrogenQuotaDate.trim() : '';
   const path = `users/${uid}`;
+
+  let updateFields;
+  if (existingLastReset !== todayKey || cycleExpired) {
+    const renewedCredits = Math.max(dailyLimit, currentRemaining);
+    const nextCycleStart = Math.max(now, Number(currentProfile.cycleStartedAt) || 0);
+    updateFields = {
+      hydrogenUsedCount: 0,
+      hydrogenQuotaDate: todayKey,
+      remainingCredits: renewedCredits,
+      lastResetDate: todayKey,
+      cycleStartedAt: nextCycleStart
+    };
+  } else if (!hasQuotaDate || typeof currentProfile.hydrogenUsedCount !== 'number' || !Number.isFinite(currentProfile.hydrogenUsedCount)) {
+    const migrated = getProfileHydrogenQuotaState(currentProfile, todayKey, dailyLimit);
+    updateFields = {
+      hydrogenUsedCount: migrated.used,
+      hydrogenQuotaDate: todayKey,
+      remainingCredits: currentRemaining,
+      lastResetDate: existingLastReset || todayKey,
+      cycleStartedAt: Number(currentProfile.cycleStartedAt) || now
+    };
+  } else if (existingQuotaDate !== todayKey) {
+    updateFields = {
+      hydrogenUsedCount: 0,
+      hydrogenQuotaDate: todayKey,
+      remainingCredits: currentRemaining,
+      lastResetDate: existingLastReset || todayKey,
+      cycleStartedAt: Number(currentProfile.cycleStartedAt) || now
+    };
+  } else {
+    return null;
+  }
+
   try {
     await updateDoc(doc(db, 'users', uid), {
-      remainingCredits: currentRemaining - 1,
-      totalUsed: Math.max(0, Math.floor(Number(currentProfile.totalUsed) || 0)) + 1,
+      ...updateFields,
       updatedAt: serverTimestamp(),
       lastActiveAt: serverTimestamp()
+    });
+    return updateFields;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
+  }
+}
+
+export async function consumeUserCreditInFirestore(uid, currentProfile) {
+  if (!uid) return null;
+  const path = `users/${uid}`;
+  const userRef = doc(db, 'users', uid);
+
+  try {
+    return await runTransaction(db, async (tx) => {
+      const snap = await tx.get(userRef);
+      const data = snap.exists() ? snap.data() : currentProfile;
+      if (!data || data.banned === true) return null;
+
+      const now = Date.now();
+      const todayKey = getLocalCalendarDateString(new Date(now));
+      const dailyLimit = clampDailyLimit(data.dailyLimit);
+      const currentRemaining = clampCredits(data.remainingCredits, dailyLimit);
+      const currentTotalUsed = Math.max(0, Math.floor(Number(data.totalUsed) || 0));
+      const existingLastReset = typeof data.lastResetDate === 'string' ? data.lastResetDate.trim() : '';
+      const hasQuotaDate = typeof data.hydrogenQuotaDate === 'string' && Boolean(data.hydrogenQuotaDate.trim());
+      const existingQuotaDate = hasQuotaDate ? data.hydrogenQuotaDate.trim() : '';
+      const isNewDay = hasQuotaDate ? existingQuotaDate !== todayKey : existingLastReset !== todayKey;
+
+      if (isNewDay && existingLastReset !== todayKey) {
+        const baseCredits = Math.max(dailyLimit, currentRemaining);
+        const nextRemaining = Math.max(0, baseCredits - 1);
+        const nextCycleStart = Math.max(now, Number(data.cycleStartedAt) || 0);
+        const resultFields = {
+          hydrogenUsedCount: 1,
+          hydrogenQuotaDate: todayKey,
+          lastResetDate: todayKey,
+          cycleStartedAt: nextCycleStart,
+          remainingCredits: nextRemaining,
+          totalUsed: currentTotalUsed + 1
+        };
+        tx.update(userRef, {
+          ...resultFields,
+          updatedAt: serverTimestamp(),
+          lastActiveAt: serverTimestamp()
+        });
+        return resultFields;
+      }
+
+      if (currentRemaining <= 0) return null;
+
+      const priorUsed = typeof data.hydrogenUsedCount === 'number' && Number.isFinite(data.hydrogenUsedCount) && data.hydrogenUsedCount >= 0
+        ? (isNewDay ? 0 : Math.floor(data.hydrogenUsedCount))
+        : Math.max(0, dailyLimit - currentRemaining);
+      const nextUsed = priorUsed + 1;
+      const nextRemaining = Math.max(0, currentRemaining - 1);
+      const resultFields = {
+        hydrogenUsedCount: nextUsed,
+        hydrogenQuotaDate: todayKey,
+        lastResetDate: existingLastReset || todayKey,
+        cycleStartedAt: Number(data.cycleStartedAt) || now,
+        remainingCredits: nextRemaining,
+        totalUsed: currentTotalUsed + 1
+      };
+      tx.update(userRef, {
+        ...resultFields,
+        updatedAt: serverTimestamp(),
+        lastActiveAt: serverTimestamp()
+      });
+      return resultFields;
     });
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, path);
@@ -249,27 +358,8 @@ export async function consumeUserCreditInFirestore(uid, currentProfile) {
 }
 
 export async function renewExpiredCycleInFirestore(uid, currentProfile) {
-  if (!uid || !currentProfile) return;
-  const now = Date.now();
-  if (!isUserProfileCycleExpired(currentProfile, now)) return;
-
-  const dailyLimit = clampDailyLimit(currentProfile.dailyLimit);
-  const currentRemaining = clampCredits(currentProfile.remainingCredits, dailyLimit);
-  const renewedCredits = Math.max(dailyLimit, currentRemaining);
-  const todayKey = getLocalDateKey(new Date(now));
-  const path = `users/${uid}`;
-
-  try {
-    await updateDoc(doc(db, 'users', uid), {
-      remainingCredits: renewedCredits,
-      cycleStartedAt: now,
-      lastResetDate: todayKey,
-      updatedAt: serverTimestamp(),
-      lastActiveAt: serverTimestamp()
-    });
-  } catch (error) {
-    handleFirestoreError(error, OperationType.UPDATE, path);
-  }
+  if (!uid || !currentProfile) return null;
+  return syncDailyHydrogenQuotaInFirestore(uid, currentProfile);
 }
 
 export function subscribeUserChats(uid, onChats, onError) {

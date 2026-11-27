@@ -77,3 +77,104 @@ export function reconcileCreditsWithHydrogenQuota(
     remaining: cappedRemaining
   };
 }
+
+export function shouldDeductHydrogenAttempt({
+  responseOk = true,
+  ok = true,
+  status = 200,
+  replyText = '',
+  usedFallback = false,
+  usedModel = ''
+} = {}) {
+  if (responseOk === false || ok === false) {
+    return false;
+  }
+  const numericStatus = Number(status);
+  if (Number.isFinite(numericStatus) && numericStatus >= 400) {
+    return false;
+  }
+  if (typeof replyText !== 'string' || !replyText.trim()) {
+    return false;
+  }
+  if (usedFallback) {
+    return false;
+  }
+  if (usedModel && usedModel !== MODEL_HYDROGEN) {
+    return false;
+  }
+  return true;
+}
+
+export function getLocalCalendarDateString(now = new Date()) {
+  const d = now instanceof Date ? now : new Date(now);
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+export function doesHydrogenQuotaNeedReset(profile, todayDate = getLocalCalendarDateString()) {
+  if (!profile || typeof profile !== 'object') return false;
+  const storedDate = typeof profile.hydrogenQuotaDate === 'string'
+    ? profile.hydrogenQuotaDate.trim()
+    : '';
+  const storedUsed = Number(profile.hydrogenUsedCount);
+  return !storedDate || storedDate !== todayDate || !Number.isFinite(storedUsed) || storedUsed < 0;
+}
+
+export function getProfileHydrogenQuotaState(
+  profile,
+  todayDate = getLocalCalendarDateString(),
+  dailyLimit = DAILY_HYDROGEN_LIMIT
+) {
+  const safeLimit = Math.max(1, Math.floor(Number(dailyLimit || profile?.dailyLimit) || DAILY_HYDROGEN_LIMIT));
+  if (!profile || typeof profile !== 'object') {
+    return {
+      used: 0,
+      remaining: safeLimit,
+      limit: safeLimit,
+      quotaDate: todayDate,
+      needsReset: false
+    };
+  }
+
+  const storedQuotaDate = typeof profile.hydrogenQuotaDate === 'string'
+    ? profile.hydrogenQuotaDate.trim()
+    : '';
+  const storedResetDate = typeof profile.lastResetDate === 'string'
+    ? profile.lastResetDate.trim()
+    : '';
+  const storedUsedNum = Number(profile.hydrogenUsedCount);
+  const hasStoredQuotaDate = Boolean(storedQuotaDate);
+  const hasStoredUsed = Number.isFinite(storedUsedNum) && storedUsedNum >= 0;
+
+  let used = 0;
+  let needsReset = false;
+
+  if (hasStoredQuotaDate) {
+    if (storedQuotaDate === todayDate) {
+      used = hasStoredUsed ? Math.min(safeLimit, Math.floor(storedUsedNum)) : 0;
+      needsReset = !hasStoredUsed;
+    } else {
+      used = 0;
+      needsReset = true;
+    }
+  } else {
+    needsReset = true;
+    if (storedResetDate === todayDate && Number.isFinite(Number(profile.remainingCredits))) {
+      const safeRemaining = Math.max(0, Math.min(safeLimit, Math.floor(Number(profile.remainingCredits))));
+      used = Math.max(0, safeLimit - safeRemaining);
+    } else {
+      used = 0;
+    }
+  }
+
+  const remaining = Math.max(0, safeLimit - used);
+  return {
+    used,
+    remaining,
+    limit: safeLimit,
+    quotaDate: todayDate,
+    needsReset
+  };
+}

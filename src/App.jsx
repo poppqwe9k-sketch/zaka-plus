@@ -7,6 +7,7 @@ import './speech-dictation.css';
 import './credits-admob.css';
 import './auth-admin.css';
 import './voice-call.css';
+import './maps.css';
 import { getRedirectResult, onAuthStateChanged, sendEmailVerification, signOut } from 'firebase/auth';
 import { auth } from './firebase.js';
 import { enableChatAutoScroll, scrollToBottom } from './chat-scroll.js';
@@ -20,6 +21,7 @@ import {
 } from './shared/modelTiers.js';
 import AuthModal from './components/AuthModal.jsx';
 import AdminPanelModal from './components/AdminPanelModal.jsx';
+import GoogleMapsModal from './components/GoogleMapsModal.jsx';
 import HydrogenQuotaBar from './components/HydrogenQuotaBar.jsx';
 import VoiceCallModal from './components/VoiceCallModal.jsx';
 import VoiceWaveCanvas from './components/VoiceWaveCanvas.jsx';
@@ -77,10 +79,14 @@ import {
 } from './utils/credits.js';
 import {
   DAILY_HYDROGEN_LIMIT,
+  doesHydrogenQuotaNeedReset,
   exhaustHydrogenQuotaToday,
   getHydrogenUsedToday,
+  getLocalCalendarDateString,
+  getProfileHydrogenQuotaState,
   incrementHydrogenUsedToday,
-  reconcileCreditsWithHydrogenQuota
+  reconcileCreditsWithHydrogenQuota,
+  shouldDeductHydrogenAttempt
 } from './utils/hydrogenQuota.js';
 import {
   clampCredits,
@@ -104,6 +110,7 @@ import {
   subscribeAdminDashboardData,
   subscribeUserChats,
   subscribeUserProfile,
+  syncDailyHydrogenQuotaInFirestore,
   syncUserProfileOnSignIn,
   upsertUserChatInFirestore
 } from './services/userAccountService.js';
@@ -114,6 +121,7 @@ import {
 } from './utils/pacificTime.js';
 import { buildSharePayload, shareOrCopyApp } from './utils/shareApp.js';
 import { buildVoiceSystemInstruction } from './utils/voiceCall.js';
+import { GMP_QUOTA_DOCS_URL, buildPlaceChatPrompt } from './utils/mapsHelpers.js';
 
 const MAX_ATTACHMENT_BYTES = 7 * 1024 * 1024;
 const MAX_ATTACHMENTS = 4;
@@ -335,6 +343,15 @@ function ExternalLinkIcon() {
   );
 }
 
+function MapPinIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 21s-6-5.35-6-10a6 6 0 1 1 12 0c0 4.65-6 10-6 10z" />
+      <circle cx="12" cy="11" r="2.2" />
+    </svg>
+  );
+}
+
 function sanitizeClientSources(rawSources) {
   if (!Array.isArray(rawSources) || rawSources.length === 0) return [];
   const seen = new Set();
@@ -418,6 +435,12 @@ export default function App() {
   const [sendingVerification, setSendingVerification] = useState(false);
   const [voiceCallOpen, setVoiceCallOpen] = useState(false);
   const [voiceCallPhase, setVoiceCallPhase] = useState('idle');
+  const [mapsModalOpen, setMapsModalOpen] = useState(false);
+  const [mapsQuotaExceeded, setMapsQuotaExceeded] = useState(false);
+  const [mapsApiKey, setMapsApiKey] = useState(() =>
+    (import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '').trim()
+  );
+  const [mapsConfigLoading, setMapsConfigLoading] = useState(false);
   const shareTimerRef = useRef(null);
   const voiceCallRef = useRef(null);
   const callLogoRef = useRef(null);
@@ -437,6 +460,7 @@ export default function App() {
   const deletedChatIdsRef = useRef(new Set());
   const pendingDisplayNameRef = useRef({ uid: null, displayName: '' });
   const healedProfileUidsRef = useRef(new Set());
+  const quotaSyncInFlightRef = useRef(false);
   const chatsRef = useRef(chats);
   chatsRef.current = chats;
   const activeChatIdRef = useRef(activeChatId);
@@ -479,6 +503,36 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    const handleMapsQuotaExceeded = () => setMapsQuotaExceeded(true);
+    window.addEventListener('gmp-quota-exceeded', handleMapsQuotaExceeded);
+    return () => {
+      window.removeEventListener('gmp-quota-exceeded', handleMapsQuotaExceeded);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!mapsModalOpen || mapsApiKey) return undefined;
+    let cancelled = false;
+    setMapsConfigLoading(true);
+    fetch('/api/maps-config', { cache: 'no-store' })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((payload) => {
+        if (cancelled) return;
+        const serverKey = typeof payload?.apiKey === 'string' ? payload.apiKey.trim() : '';
+        if (serverKey) {
+          setMapsApiKey(serverKey);
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setMapsConfigLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [mapsModalOpen, mapsApiKey]);
+
+  useEffect(() => {
     document.documentElement.lang = langMeta.code;
     document.documentElement.dir = langMeta.dir;
   }, [langMeta.code, langMeta.dir]);
@@ -506,13 +560,30 @@ export default function App() {
     saveCreditsState(credits, storageKey);
   }, [credits, currentUser?.uid]);
 
+  const activeHydrogenQuota = useMemo(() => {
+    const todayKey = getLocalCalendarDateString();
+    const limit = clampDailyLimit(userProfile?.dailyLimit || credits.dailyLimit);
+    if (currentUser?.uid && userProfile) {
+      return getProfileHydrogenQuotaState(userProfile, todayKey, limit);
+    }
+    const clampedGuestLimit = Math.min(limit, DAILY_HYDROGEN_LIMIT);
+    const usedGuest = Math.min(clampedGuestLimit, getHydrogenUsedToday());
+    return {
+      used: usedGuest,
+      remaining: Math.max(0, clampedGuestLimit - usedGuest),
+      limit: clampedGuestLimit,
+      quotaDate: todayKey,
+      needsReset: false
+    };
+  }, [currentUser?.uid, userProfile, credits.dailyLimit, credits.remaining]);
+
   useEffect(() => {
-    if (credits.remaining <= 0 && activeModelTier !== FAST_MODEL_TIER) {
+    if (activeHydrogenQuota.remaining <= 0 && activeModelTier !== FAST_MODEL_TIER) {
       setSettings((prev) => normalizeSettings({ ...prev, selectedModel: FAST_MODEL_TIER }));
       setAutoSwitchedToLite(true);
       setQuotaNoticeDismissed(false);
     }
-  }, [credits.remaining, activeModelTier]);
+  }, [activeHydrogenQuota.remaining, activeModelTier]);
 
   useEffect(() => {
     if (!renamingChatId) return;
@@ -646,6 +717,30 @@ export default function App() {
       if (cancelled || activeScopeRef.current !== nextScopeKey) return;
       if (syncedProfile) {
         setUserProfile(syncedProfile);
+        const nowMs = Date.now();
+        const todayKey = getLocalCalendarDateString(new Date(nowMs));
+        const userDailyLimit = clampDailyLimit(syncedProfile.dailyLimit);
+        const pq = getProfileHydrogenQuotaState(syncedProfile, todayKey, userDailyLimit);
+        const synced = {
+          ...normalizeCreditsState(
+            {
+              remaining: pq.remaining,
+              cycleStartedAt: Number(syncedProfile.cycleStartedAt) || nowMs,
+              lastResetDate: todayKey,
+              totalUsed: Number(syncedProfile.totalUsed) || 0
+            },
+            todayKey,
+            nowMs,
+            userDailyLimit
+          ),
+          remaining: pq.remaining,
+          dailyLimit: pq.limit
+        };
+        setCredits(synced);
+        saveCreditsState(synced, cachedKey);
+        if (pq.remaining > 0) {
+          setAutoSwitchedToLite(false);
+        }
       }
 
       unsubProfile = subscribeUserProfile(
@@ -657,24 +752,39 @@ export default function App() {
             return;
           }
           const nowMs = Date.now();
-          const todayKey = getLocalDateKey(new Date(nowMs));
+          const todayKey = getLocalCalendarDateString(new Date(nowMs));
           const userDailyLimit = clampDailyLimit(profileData.dailyLimit);
-          const synced = reconcileCreditsWithHydrogenQuota(
-            normalizeCreditsState(
+          const pq = getProfileHydrogenQuotaState(profileData, todayKey, userDailyLimit);
+          if (pq.needsReset && !quotaSyncInFlightRef.current) {
+            quotaSyncInFlightRef.current = true;
+            syncDailyHydrogenQuotaInFirestore(firebaseUser.uid, profileData)
+              .catch((syncErr) => {
+                console.error('Failed syncing daily hydrogen quota on open:', syncErr);
+              })
+              .finally(() => {
+                quotaSyncInFlightRef.current = false;
+              });
+          }
+          const synced = {
+            ...normalizeCreditsState(
               {
-                remaining: clampCredits(profileData.remainingCredits, userDailyLimit),
+                remaining: pq.remaining,
                 cycleStartedAt: Number(profileData.cycleStartedAt) || nowMs,
-                lastResetDate: profileData.lastResetDate || todayKey,
+                lastResetDate: todayKey,
                 totalUsed: Number(profileData.totalUsed) || 0
               },
               todayKey,
               nowMs,
               userDailyLimit
             ),
-            userDailyLimit
-          );
+            remaining: pq.remaining,
+            dailyLimit: pq.limit
+          };
           setCredits(synced);
           saveCreditsState(synced, cachedKey);
+          if (pq.remaining > 0) {
+            setAutoSwitchedToLite(false);
+          }
         },
         (subErr) => {
           console.error('User profile subscription error:', subErr);
@@ -881,13 +991,25 @@ export default function App() {
       });
       setCredits((prev) => {
         const now = Date.now();
-        const today = getLocalDateKey(new Date(now));
+        const today = getLocalCalendarDateString(new Date(now));
         const limit = clampDailyLimit(userProfile?.dailyLimit || prev.dailyLimit);
-        if (!isCreditsCycleExpired(prev, today, now)) return prev;
-        if (currentUser?.uid && userProfile) {
-          renewExpiredCycleInFirestore(currentUser.uid, userProfile).catch(() => {});
+        const profileNeedsReset = Boolean(currentUser?.uid && userProfile && doesHydrogenQuotaNeedReset(userProfile, today));
+        if (!profileNeedsReset && !isCreditsCycleExpired(prev, today, now)) return prev;
+        if (currentUser?.uid && userProfile && !quotaSyncInFlightRef.current) {
+          quotaSyncInFlightRef.current = true;
+          syncDailyHydrogenQuotaInFirestore(currentUser.uid, userProfile)
+            .catch(() => {})
+            .finally(() => {
+              quotaSyncInFlightRef.current = false;
+            });
         }
-        return normalizeCreditsState(prev, today, now, limit);
+        setAutoSwitchedToLite(false);
+        return {
+          ...normalizeCreditsState(prev, today, now, limit),
+          remaining: limit,
+          dailyLimit: limit,
+          lastResetDate: today
+        };
       });
     }, 30000);
 
@@ -896,13 +1018,25 @@ export default function App() {
         syncServerQuota();
         setCredits((prev) => {
           const now = Date.now();
-          const today = getLocalDateKey(new Date(now));
+          const today = getLocalCalendarDateString(new Date(now));
           const limit = clampDailyLimit(userProfile?.dailyLimit || prev.dailyLimit);
-          if (!isCreditsCycleExpired(prev, today, now)) return prev;
-          if (currentUser?.uid && userProfile) {
-            renewExpiredCycleInFirestore(currentUser.uid, userProfile).catch(() => {});
+          const profileNeedsReset = Boolean(currentUser?.uid && userProfile && doesHydrogenQuotaNeedReset(userProfile, today));
+          if (!profileNeedsReset && !isCreditsCycleExpired(prev, today, now)) return prev;
+          if (currentUser?.uid && userProfile && !quotaSyncInFlightRef.current) {
+            quotaSyncInFlightRef.current = true;
+            syncDailyHydrogenQuotaInFirestore(currentUser.uid, userProfile)
+              .catch(() => {})
+              .finally(() => {
+                quotaSyncInFlightRef.current = false;
+              });
           }
-          return normalizeCreditsState(prev, today, now, limit);
+          setAutoSwitchedToLite(false);
+          return {
+            ...normalizeCreditsState(prev, today, now, limit),
+            remaining: limit,
+            dailyLimit: limit,
+            lastResetDate: today
+          };
         });
       }
     };
@@ -1316,12 +1450,38 @@ export default function App() {
     }
     const trimmed = typeof promptText === 'string' ? promptText.trim() : '';
     const nowMs = Date.now();
-    const todayKey = getLocalDateKey(new Date(nowMs));
+    const todayKey = getLocalCalendarDateString(new Date(nowMs));
     const userLimit = clampDailyLimit(userProfile?.dailyLimit || credits.dailyLimit);
-    const currentCredits = reconcileCreditsWithHydrogenQuota(
-      normalizeCreditsState(credits, todayKey, nowMs, userLimit),
-      userLimit
-    );
+    let currentHydrogenUsed = getHydrogenUsedToday(new Date(nowMs));
+    let currentCredits;
+    if (currentUser?.uid && userProfile) {
+      const pq = getProfileHydrogenQuotaState(userProfile, todayKey, userLimit);
+      if (pq.needsReset && !quotaSyncInFlightRef.current) {
+        quotaSyncInFlightRef.current = true;
+        syncDailyHydrogenQuotaInFirestore(currentUser.uid, userProfile)
+          .then((syncedFields) => {
+            if (syncedFields) {
+              setUserProfile((p) => (p ? { ...p, ...syncedFields } : p));
+            }
+          })
+          .catch(() => {})
+          .finally(() => {
+            quotaSyncInFlightRef.current = false;
+          });
+      }
+      currentHydrogenUsed = pq.used;
+      currentCredits = {
+        ...normalizeCreditsState(credits, todayKey, nowMs, userLimit),
+        remaining: pq.remaining,
+        dailyLimit: pq.limit,
+        lastResetDate: todayKey
+      };
+    } else {
+      currentCredits = reconcileCreditsWithHydrogenQuota(
+        normalizeCreditsState(credits, todayKey, nowMs, userLimit),
+        userLimit
+      );
+    }
     if (
       currentCredits.remaining !== credits.remaining
       || currentCredits.lastResetDate !== credits.lastResetDate
@@ -1417,7 +1577,7 @@ export default function App() {
           selectedModel: useFallbackMode ? FAST_MODEL_TIER : activeModelTier,
           model: useFallbackMode ? GEMINI_FALLBACK_LITE_MODEL_ID : GEMINI_HYDROGEN_MODEL_ID,
           useFallbackOnly: useFallbackMode,
-          plusPlusUsedCount: getHydrogenUsedToday(),
+          plusPlusUsedCount: currentHydrogenUsed,
           hasUpgradedPlan: userLimit > DAILY_HYDROGEN_LIMIT,
           deepThinking: settings.deepThinking
         })
@@ -1435,7 +1595,7 @@ export default function App() {
         ? rawText.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 260)
         : '';
 
-      if (!response.ok) {
+      if (!response.ok || data?.ok === false) {
         if (data?.quotaMeta && typeof data.quotaMeta === 'object') {
           setDailyQuota((prev) => {
             const base = prev || loadDailyQuotaState();
@@ -1466,6 +1626,7 @@ export default function App() {
       const primaryExhausted = Boolean(data?.primaryCapacityExhausted);
       const usedPlusPlus = data?.model === GEMINI_HYDROGEN_MODEL_ID
         || (!data?.model && data?.usedTier === SUPER_MODEL_TIER);
+      const resolvedModelId = data?.model || (usedPlusPlus ? GEMINI_HYDROGEN_MODEL_ID : GEMINI_FALLBACK_LITE_MODEL_ID);
       const consumedChars = calculateExchangeCharCount(trimmed, replyText);
       setGlobalCapacityExhausted(primaryExhausted || (useFallbackMode && globalCapacityExhausted));
 
@@ -1535,39 +1696,89 @@ export default function App() {
           });
       }
 
-      if (shouldDeductCreditForReply({ usedFallback })) {
-        incrementHydrogenUsedToday();
-        let remainingAfterSend = credits.remaining;
-        setCredits((prev) => {
-          const limit = clampDailyLimit(userProfile?.dailyLimit || prev.dailyLimit);
-          const next = reconcileCreditsWithHydrogenQuota(
-            consumeOneCredit(prev, getLocalDateKey(), Date.now(), limit),
-            limit
-          );
-          remainingAfterSend = next.remaining;
-          saveCreditsState(next, getUserCreditsStorageKey(currentUser?.uid || ''));
-          return next;
-        });
-        if (remainingAfterSend <= 0 && activeModelTier !== FAST_MODEL_TIER) {
-          updateSetting('selectedModel', FAST_MODEL_TIER);
-          setAutoSwitchedToLite(true);
-          setQuotaNoticeDismissed(false);
-        }
+      const canDeductHydrogenAttempt = shouldDeductCreditForReply({ usedFallback }) && shouldDeductHydrogenAttempt({
+        responseOk: response.ok,
+        ok: data?.ok,
+        status: response.status,
+        replyText,
+        usedFallback,
+        usedModel: resolvedModelId
+      });
+
+      if (canDeductHydrogenAttempt) {
         if (currentUser?.uid && userProfile) {
-          consumeUserCreditInFirestore(currentUser.uid, userProfile).catch((consumeErr) => {
-            console.error('Failed syncing consumed message credit:', consumeErr);
+          const nextUsed = currentHydrogenUsed + 1;
+          const nextRemaining = Math.max(0, userLimit - nextUsed);
+          setUserProfile((prevProfile) => (prevProfile ? {
+            ...prevProfile,
+            hydrogenUsedCount: nextUsed,
+            hydrogenQuotaDate: todayKey,
+            remainingCredits: nextRemaining,
+            totalUsed: Math.max(0, Math.floor(Number(prevProfile.totalUsed) || 0)) + 1
+          } : prevProfile));
+          setCredits((prev) => {
+            const next = {
+              ...normalizeCreditsState(prev, todayKey, Date.now(), userLimit),
+              remaining: nextRemaining,
+              dailyLimit: userLimit,
+              lastResetDate: todayKey,
+              totalUsed: (Number(prev.totalUsed) || 0) + 1
+            };
+            saveCreditsState(next, getUserCreditsStorageKey(currentUser.uid));
+            return next;
           });
+          if (nextRemaining <= 0 && activeModelTier !== FAST_MODEL_TIER) {
+            updateSetting('selectedModel', FAST_MODEL_TIER);
+            setAutoSwitchedToLite(true);
+            setQuotaNoticeDismissed(false);
+          }
+          consumeUserCreditInFirestore(currentUser.uid, userProfile)
+            .then((committedFields) => {
+              if (committedFields) {
+                setUserProfile((prevProfile) => (prevProfile ? { ...prevProfile, ...committedFields } : prevProfile));
+              }
+            })
+            .catch((consumeErr) => {
+              console.error('Failed syncing consumed message credit:', consumeErr);
+            });
+        } else {
+          incrementHydrogenUsedToday();
+          let remainingAfterSend = credits.remaining;
+          setCredits((prev) => {
+            const limit = clampDailyLimit(prev.dailyLimit);
+            const next = reconcileCreditsWithHydrogenQuota(
+              consumeOneCredit(prev, getLocalDateKey(), Date.now(), limit),
+              limit
+            );
+            remainingAfterSend = next.remaining;
+            saveCreditsState(next, getUserCreditsStorageKey(''));
+            return next;
+          });
+          if (remainingAfterSend <= 0 && activeModelTier !== FAST_MODEL_TIER) {
+            updateSetting('selectedModel', FAST_MODEL_TIER);
+            setAutoSwitchedToLite(true);
+            setQuotaNoticeDismissed(false);
+          }
         }
       } else if (usedFallback) {
         if (!useFallbackMode && userLimit <= DAILY_HYDROGEN_LIMIT) {
-          exhaustHydrogenQuotaToday();
+          if (currentUser?.uid && userProfile) {
+            setUserProfile((prevProfile) => (prevProfile ? {
+              ...prevProfile,
+              hydrogenUsedCount: userLimit,
+              hydrogenQuotaDate: todayKey,
+              remainingCredits: 0
+            } : prevProfile));
+          } else {
+            exhaustHydrogenQuotaToday();
+          }
           setCredits((prev) => {
             const limit = clampDailyLimit(userProfile?.dailyLimit || prev.dailyLimit);
-            const next = reconcileCreditsWithHydrogenQuota(
-              normalizeCreditsState(prev, getLocalDateKey(), Date.now(), limit),
-              limit,
-              0
-            );
+            const next = {
+              ...normalizeCreditsState(prev, todayKey, Date.now(), limit),
+              remaining: 0,
+              dailyLimit: limit
+            };
             saveCreditsState(next, getUserCreditsStorageKey(currentUser?.uid || ''));
             return next;
           });
@@ -1766,20 +1977,52 @@ export default function App() {
           }),
           { syncCloud: true }
         );
-        incrementHydrogenUsedToday();
-        setCredits((prev) => {
-          const limit = clampDailyLimit(userProfile?.dailyLimit || prev.dailyLimit);
-          const next = reconcileCreditsWithHydrogenQuota(
-            consumeOneCredit(prev, getLocalDateKey(), Date.now(), limit),
-            limit
-          );
-          saveCreditsState(next, getUserCreditsStorageKey(currentUser?.uid || ''));
-          return next;
-        });
-        if (currentUser?.uid && userProfile) {
-          consumeUserCreditInFirestore(currentUser.uid, userProfile).catch((consumeErr) => {
-            console.error('Failed syncing consumed image credit:', consumeErr);
-          });
+        if (result?.promptModel === GEMINI_HYDROGEN_MODEL_ID) {
+          if (currentUser?.uid && userProfile) {
+            const imgToday = getLocalCalendarDateString();
+            const imgLimit = clampDailyLimit(userProfile.dailyLimit || credits.dailyLimit);
+            const imgQuota = getProfileHydrogenQuotaState(userProfile, imgToday, imgLimit);
+            const nextUsed = imgQuota.used + 1;
+            const nextRemaining = Math.max(0, imgLimit - nextUsed);
+            setUserProfile((prevProfile) => (prevProfile ? {
+              ...prevProfile,
+              hydrogenUsedCount: nextUsed,
+              hydrogenQuotaDate: imgToday,
+              remainingCredits: nextRemaining,
+              totalUsed: Math.max(0, Math.floor(Number(prevProfile.totalUsed) || 0)) + 1
+            } : prevProfile));
+            setCredits((prev) => {
+              const next = {
+                ...normalizeCreditsState(prev, imgToday, Date.now(), imgLimit),
+                remaining: nextRemaining,
+                dailyLimit: imgLimit,
+                lastResetDate: imgToday,
+                totalUsed: (Number(prev.totalUsed) || 0) + 1
+              };
+              saveCreditsState(next, getUserCreditsStorageKey(currentUser.uid));
+              return next;
+            });
+            consumeUserCreditInFirestore(currentUser.uid, userProfile)
+              .then((committedFields) => {
+                if (committedFields) {
+                  setUserProfile((prevProfile) => (prevProfile ? { ...prevProfile, ...committedFields } : prevProfile));
+                }
+              })
+              .catch((consumeErr) => {
+                console.error('Failed syncing consumed image credit:', consumeErr);
+              });
+          } else {
+            incrementHydrogenUsedToday();
+            setCredits((prev) => {
+              const limit = clampDailyLimit(prev.dailyLimit);
+              const next = reconcileCreditsWithHydrogenQuota(
+                consumeOneCredit(prev, getLocalDateKey(), Date.now(), limit),
+                limit
+              );
+              saveCreditsState(next, getUserCreditsStorageKey(''));
+              return next;
+            });
+          }
         }
         if (currentUser?.uid && result.promptModel) {
           const promptChars = result.promptChars || calculateExchangeCharCount(trimmed, result.englishPrompt);
@@ -1916,6 +2159,22 @@ export default function App() {
       dir={langMeta.dir}
       data-online={isOnline ? 'true' : 'false'}
     >
+      {mapsQuotaExceeded && (
+        <div className="maps-quota-banner" data-testid="maps-quota-banner" role="alert">
+          <span>
+            Google Maps Platform quota reached. If you are the app owner, visit{' '}
+            <a
+              href={GMP_QUOTA_DOCS_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="maps-quota-banner-link"
+            >
+              maps developer site
+            </a>{' '}
+            for instructions to update your account.
+          </span>
+        </div>
+      )}
       {sidebarOpen && (
         <button
           type="button"
@@ -2399,8 +2658,8 @@ export default function App() {
 
           <HydrogenQuotaBar
             selectedModel={activeModelOption.model}
-            remainingCount={credits.remaining}
-            dailyLimit={clampDailyLimit(userProfile?.dailyLimit || credits.dailyLimit)}
+            remainingCount={activeHydrogenQuota.remaining}
+            dailyLimit={activeHydrogenQuota.limit}
             autoSwitchedToLite={autoSwitchedToLite}
             noticeDismissed={quotaNoticeDismissed}
             highlightNotice={creditsExhaustedHighlight}
@@ -2459,7 +2718,7 @@ export default function App() {
                   {MODEL_SELECTOR_OPTIONS.map((opt) => {
                     const isSelected = activeModelTier === opt.id;
                     const isSuperOption = opt.id !== FAST_MODEL_TIER;
-                    const isSuperDepleted = isSuperOption && credits.remaining <= 0;
+                    const isSuperDepleted = isSuperOption && activeHydrogenQuota.remaining <= 0;
                     return (
                       <button
                         key={opt.id}
@@ -2625,6 +2884,17 @@ export default function App() {
             >
               <ImageCreateIcon />
               <span>{t.imageMode}</span>
+            </button>
+
+            <button
+              type="button"
+              data-testid="maps-mode-button"
+              className={`deep-thinking-button maps-mode-button ${mapsModalOpen ? 'deep-thinking-active' : ''}`}
+              aria-pressed={mapsModalOpen}
+              onClick={() => setMapsModalOpen(true)}
+            >
+              <MapPinIcon />
+              <span>{t.mapsButtonLabel}</span>
             </button>
 
             {settings.deepThinking && (
@@ -2794,6 +3064,26 @@ export default function App() {
           t={t}
         />
       )}
+      <GoogleMapsModal
+        open={mapsModalOpen}
+        onClose={() => setMapsModalOpen(false)}
+        apiKey={mapsApiKey}
+        configLoading={mapsConfigLoading}
+        langCode={langMeta.code}
+        dir={langMeta.dir}
+        t={t}
+        onAskAboutPlace={(place) => {
+          const prompt = buildPlaceChatPrompt(place, langMeta.code);
+          if (prompt) {
+            setImageMode(false);
+            setInput(prompt);
+            voiceBaseTextRef.current = prompt;
+            window.setTimeout(() => {
+              messageInputRef.current?.focus();
+            }, 60);
+          }
+        }}
+      />
     </div>
   );
 }

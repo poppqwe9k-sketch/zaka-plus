@@ -77,6 +77,7 @@ export function buildInitialUserProfile({
   todayKey = getLocalDateKey(new Date(now))
 }) {
   const safeEmail = sanitizeEmail(email);
+  const safeDateKey = String(todayKey || getLocalDateKey()).slice(0, 20);
   return {
     uid: String(uid || '').slice(0, 128),
     email: safeEmail || 'user@plus-ai.local',
@@ -85,7 +86,9 @@ export function buildInitialUserProfile({
     dailyLimit: DAILY_FREE_CREDITS,
     remainingCredits: DAILY_FREE_CREDITS,
     cycleStartedAt: Math.max(0, Math.floor(now)),
-    lastResetDate: String(todayKey || getLocalDateKey()).slice(0, 20),
+    lastResetDate: safeDateKey,
+    hydrogenUsedCount: 0,
+    hydrogenQuotaDate: safeDateKey,
     totalUsed: 0,
     visitsCount: 1,
     banned: false

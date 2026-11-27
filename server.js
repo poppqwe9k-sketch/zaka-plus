@@ -6,6 +6,7 @@ import { onRequestPost as onImagePost } from './functions/api/image.js';
 import { onRequestGet as onQuotaGet } from './functions/api/quota.js';
 import { onRequestPost as onTtsPost } from './functions/api/tts.js';
 import { onRequestPost as onTranscribePost } from './functions/api/transcribe.js';
+import { onRequestGet as onMapsConfigGet } from './functions/api/maps-config.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT) || 3000;
@@ -65,6 +66,7 @@ mountFunctionHandler('/api/image', onImagePost);
 mountFunctionHandler('/api/quota', onQuotaGet);
 mountFunctionHandler('/api/tts', onTtsPost);
 mountFunctionHandler('/api/transcribe', onTranscribePost);
+mountFunctionHandler('/api/maps-config', onMapsConfigGet);
 
 if (isProduction) {
   const distDir = path.resolve(__dirname, 'dist');

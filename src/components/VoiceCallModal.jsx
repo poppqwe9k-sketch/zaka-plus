@@ -462,10 +462,10 @@ const VoiceCallModal = forwardRef(function VoiceCallModal(
             });
             const data = await resp.json().catch(() => null);
             const transcribed = typeof data?.text === 'string' ? data.text.trim() : '';
-            if (transcribed) {
+            if (resp.ok && data?.ok !== false && transcribed) {
               await processUserUtterance(transcribed);
             } else {
-              setCallError(t.voiceNoSpeechError);
+              setCallError(data?.error || t.voiceNoSpeechError);
               setCallState('ready');
             }
           } catch {
