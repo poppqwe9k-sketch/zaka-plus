@@ -55,7 +55,9 @@ async function recordGlobalAnalytics({ isNewUser = false, recordVisit = true } =
   } catch (err) {
     const code = err?.code || '';
     const msg = err instanceof Error ? err.message : String(err || '');
-    if (code === 'not-found' || /no document to update/i.test(msg)) {
+    // Firestore update rules evaluate existing().* when analytics/site does not exist yet,
+    // which can yield either 'not-found' or 'permission-denied'. Fall back to setDoc in both cases.
+    if (code === 'not-found' || code === 'permission-denied' || /no document to update/i.test(msg)) {
       try {
         await setDoc(analyticsRef, {
           totalVisits: visitDelta,
@@ -63,19 +65,22 @@ async function recordGlobalAnalytics({ isNewUser = false, recordVisit = true } =
           updatedAt: serverTimestamp()
         });
       } catch (createErr) {
-        handleFirestoreError(createErr, OperationType.CREATE, 'analytics/site');
+        console.warn('Global analytics init deferred:', createErr?.code || createErr?.message || createErr);
       }
       return;
     }
-    handleFirestoreError(err, OperationType.UPDATE, 'analytics/site');
+    console.warn('Global analytics update deferred:', code || msg);
   }
 }
 
-export async function syncUserProfileOnSignIn(firebaseUser) {
+export async function syncUserProfileOnSignIn(firebaseUser, options = {}) {
   if (!firebaseUser?.uid) return null;
   const uid = firebaseUser.uid;
   const userRef = doc(db, 'users', uid);
   const path = `users/${uid}`;
+  const preferredDisplayName = typeof options?.preferredDisplayName === 'string'
+    ? options.preferredDisplayName.trim().slice(0, 100)
+    : '';
 
   let snap;
   try {
@@ -98,7 +103,7 @@ export async function syncUserProfileOnSignIn(firebaseUser) {
     const base = buildInitialUserProfile({
       uid,
       email: firebaseUser.email || '',
-      displayName: firebaseUser.displayName || '',
+      displayName: preferredDisplayName || firebaseUser.displayName || '',
       now,
       todayKey
     });
@@ -145,15 +150,16 @@ export async function syncUserProfileOnSignIn(firebaseUser) {
     }
   }
 
+  const resolvedName = sanitizeDisplayName(
+    preferredDisplayName || firebaseUser.displayName || existing.displayName,
+    firebaseUser.email || existing.email
+  );
+
   if (!alreadyLoggedSession) {
-    const nextDisplayName = sanitizeDisplayName(
-      firebaseUser.displayName || existing.displayName,
-      firebaseUser.email || existing.email
-    );
     try {
       await updateDoc(userRef, {
         visitsCount: increment(1),
-        displayName: nextDisplayName,
+        displayName: resolvedName,
         updatedAt: serverTimestamp(),
         lastActiveAt: serverTimestamp()
       });
@@ -165,12 +171,22 @@ export async function syncUserProfileOnSignIn(firebaseUser) {
     }
 
     await recordGlobalAnalytics({ isNewUser: false, recordVisit: true });
+  } else if (preferredDisplayName && resolvedName !== existing.displayName) {
+    try {
+      await updateDoc(userRef, {
+        displayName: resolvedName,
+        updatedAt: serverTimestamp(),
+        lastActiveAt: serverTimestamp()
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, path);
+    }
   }
 
   return existing;
 }
 
-export function subscribeUserProfile(uid, onData, onError) {
+export function subscribeUserProfile(uid, onData, onError, onMissing) {
   if (!uid) return () => {};
   const path = `users/${uid}`;
   const userRef = doc(db, 'users', uid);
@@ -180,6 +196,8 @@ export function subscribeUserProfile(uid, onData, onError) {
     (snapshot) => {
       if (snapshot.exists()) {
         onData?.(snapshot.data());
+      } else if (!snapshot.metadata?.fromCache) {
+        onMissing?.();
       }
     },
     (error) => {

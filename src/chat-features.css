@@ -277,10 +277,21 @@
   transition: border-color .15s ease, background .15s ease, transform .15s ease;
 }
 
+.chat-dark .model-dropdown-trigger {
+  background: rgba(255, 255, 255, 0.045);
+  border-color: rgba(255, 255, 255, 0.11);
+}
+
 .model-dropdown-trigger:hover,
 .model-dropdown-open {
   border-color: var(--text);
   background: var(--surface-hover);
+}
+
+.chat-dark .model-dropdown-trigger:hover,
+.chat-dark .model-dropdown-open {
+  border-color: rgba(255, 255, 255, 0.28);
+  background: rgba(255, 255, 255, 0.09);
 }
 
 .model-dropdown-trigger svg {
@@ -335,6 +346,13 @@
   border-radius: 16px;
   background: var(--surface-raised);
   box-shadow: 0 14px 40px #00000024;
+}
+
+.chat-dark .model-dropdown-menu {
+  background: rgba(13, 16, 25, 0.94);
+  border-color: rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(20px);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.65);
 }
 
 .model-option-item {

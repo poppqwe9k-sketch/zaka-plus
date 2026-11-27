@@ -177,7 +177,8 @@ service cloud.firestore {
           )
         );
 
-      allow update: if isValidId(uid)
+      allow update: if resource != null
+        && isValidId(uid)
         && isSignedIn()
         && isValidUserProfile(incoming())
         && incoming().uid == existing().uid
@@ -201,7 +202,7 @@ service cloud.firestore {
               // Action 2: Strict 24h cycle renewal back to dailyLimit
               (incoming().diff(existing()).affectedKeys().hasOnly(['remainingCredits', 'cycleStartedAt', 'lastResetDate', 'updatedAt', 'lastActiveAt'])
                 && incoming().cycleStartedAt - existing().cycleStartedAt >= 86400000
-                && incoming().cycleStartedAt <= request.time.toMillis() + 60000
+                && incoming().cycleStartedAt <= request.time.toMillis() + 300000
                 && incoming().remainingCredits >= existing().dailyLimit
                 && incoming().remainingCredits <= (existing().remainingCredits > existing().dailyLimit ? existing().remainingCredits : existing().dailyLimit)
                 && incoming().lastActiveAt == request.time
@@ -274,7 +275,7 @@ service cloud.firestore {
           ) ||
           (docId == 'quota'
             && isValidModelQuotaAnalytics(incoming())
-            && incoming().cycleStartedAt <= request.time.toMillis() + 60000
+            && incoming().cycleStartedAt <= request.time.toMillis() + 300000
             && incoming().plusPlusUsed >= 0 && incoming().plusPlusUsed <= 1
             && incoming().plusUsed >= 0 && incoming().plusUsed <= 1
             && (incoming().plusPlusUsed + incoming().plusUsed) <= 1
@@ -284,7 +285,8 @@ service cloud.firestore {
           )
         );
 
-      allow update: if isValidId(docId)
+      allow update: if resource != null
+        && isValidId(docId)
         && isSignedIn()
         && (
           (docId == 'site'

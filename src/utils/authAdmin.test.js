@@ -16,7 +16,9 @@ import {
   isAdminUser,
   isPaidPlanUser,
   isUserProfileCycleExpired,
-  mapFirebaseAuthError
+  mapFirebaseAuthError,
+  shouldFallbackToRedirectSignIn,
+  validateAuthFormInput
 } from './authAdmin.js';
 
 test('grants admin access strictly and exclusively to verified poppqwe9k@gmail.com', () => {
@@ -178,9 +180,57 @@ test('filters and sorts registered users and paid subscribers accurately', () =>
   assert.deepEqual(allUsers.map((u) => u.uid), ['2', '3', '1']);
 });
 
-test('maps Firebase Auth error codes to localized readable messages', () => {
+test('validates auth form inputs across login, signup, and forgot-password modes', () => {
+  assert.deepEqual(
+    validateAuthFormInput({ mode: 'login', email: 'bad-email', password: 'secret' }),
+    { ok: false, errorKey: 'authErrInvalidEmail', email: 'bad-email' }
+  );
+  assert.deepEqual(
+    validateAuthFormInput({ mode: 'signup', email: ' user@example.com ', password: '123' }),
+    { ok: false, errorKey: 'authErrWeakPassword', email: 'user@example.com' }
+  );
+  assert.deepEqual(
+    validateAuthFormInput({ mode: 'forgot', email: ' user@example.com ', password: '' }),
+    { ok: true, email: 'user@example.com' }
+  );
+  assert.deepEqual(
+    validateAuthFormInput({ mode: 'login', email: 'user@example.com', password: 'password123' }),
+    { ok: true, email: 'user@example.com' }
+  );
+});
+
+test('only falls back to signInWithRedirect on top-level windows when popups are blocked or unsupported', () => {
+  const topWin = {};
+  topWin.self = topWin;
+  topWin.top = topWin;
+
+  const iframeWin = { self: {}, top: {} };
+
+  assert.equal(shouldFallbackToRedirectSignIn({ code: 'auth/popup-blocked' }, topWin), true);
+  assert.equal(
+    shouldFallbackToRedirectSignIn({ code: 'auth/operation-not-supported-in-this-environment' }, topWin),
+    true
+  );
+  assert.equal(shouldFallbackToRedirectSignIn({ code: 'auth/popup-closed-by-user' }, topWin), false);
+  assert.equal(shouldFallbackToRedirectSignIn({ code: 'auth/popup-blocked' }, iframeWin), false);
+});
+
+test('maps Firebase Auth error codes to localized readable messages with provider and domain context', () => {
   assert.match(mapFirebaseAuthError({ code: 'auth/invalid-credential' }), /غير صحيحة/);
   assert.match(mapFirebaseAuthError({ code: 'auth/operation-not-allowed' }), /Google/);
-  assert.match(mapFirebaseAuthError({ code: 'auth/unauthorized-domain' }), /Authorized domains/);
+  assert.match(
+    mapFirebaseAuthError({ code: 'auth/operation-not-allowed' }, {}, { provider: 'google' }),
+    /مزوّد Google/
+  );
+  assert.match(
+    mapFirebaseAuthError(
+      { code: 'auth/unauthorized-domain' },
+      {},
+      { hostname: 'zaka-plus-web.poppqwe9k.workers.dev' }
+    ),
+    /Authorized domains.*zaka-plus-web\.poppqwe9k\.workers\.dev/
+  );
+  assert.match(mapFirebaseAuthError({ code: 'auth/configuration-not-found' }), /Authentication/);
+  assert.match(mapFirebaseAuthError({ code: 'auth/user-disabled' }), /تعطيل/);
   assert.match(mapFirebaseAuthError({ code: 'auth/account-exists-with-different-credential' }), /طريقة دخول أخرى/);
 });

@@ -4,6 +4,8 @@ import { fileURLToPath } from 'node:url';
 import { onRequestPost as onChatPost } from './functions/api/chat.js';
 import { onRequestPost as onImagePost } from './functions/api/image.js';
 import { onRequestGet as onQuotaGet } from './functions/api/quota.js';
+import { onRequestPost as onTtsPost } from './functions/api/tts.js';
+import { onRequestPost as onTranscribePost } from './functions/api/transcribe.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT) || 3000;
@@ -61,6 +63,8 @@ function mountFunctionHandler(routePath, handler) {
 mountFunctionHandler('/api/chat', onChatPost);
 mountFunctionHandler('/api/image', onImagePost);
 mountFunctionHandler('/api/quota', onQuotaGet);
+mountFunctionHandler('/api/tts', onTtsPost);
+mountFunctionHandler('/api/transcribe', onTranscribePost);
 
 if (isProduction) {
   const distDir = path.resolve(__dirname, 'dist');

@@ -6,7 +6,8 @@ import './image-generation.css';
 import './speech-dictation.css';
 import './credits-admob.css';
 import './auth-admin.css';
-import { onAuthStateChanged, signOut } from 'firebase/auth';
+import './voice-call.css';
+import { getRedirectResult, onAuthStateChanged, sendEmailVerification, signOut } from 'firebase/auth';
 import { auth } from './firebase.js';
 import { enableChatAutoScroll, scrollToBottom } from './chat-scroll.js';
 import {
@@ -19,6 +20,8 @@ import {
 } from './shared/modelTiers.js';
 import AuthModal from './components/AuthModal.jsx';
 import AdminPanelModal from './components/AdminPanelModal.jsx';
+import VoiceCallModal from './components/VoiceCallModal.jsx';
+import VoiceWaveCanvas from './components/VoiceWaveCanvas.jsx';
 import {
   LANGUAGES,
   getLanguageMeta,
@@ -76,6 +79,7 @@ import {
   clampDailyLimit,
   isAdminEmailUnverified,
   isAdminUser,
+  mapFirebaseAuthError,
   normalizePlan,
   sanitizeDisplayName
 } from './utils/authAdmin.js';
@@ -99,6 +103,7 @@ import {
   getPacificDateKey
 } from './utils/pacificTime.js';
 import { buildSharePayload, shareOrCopyApp } from './utils/shareApp.js';
+import { buildVoiceSystemInstruction } from './utils/voiceCall.js';
 
 const MAX_ATTACHMENT_BYTES = 7 * 1024 * 1024;
 const MAX_ATTACHMENTS = 4;
@@ -222,6 +227,44 @@ function ShareIcon() {
       <circle cx="6" cy="12" r="3" />
       <circle cx="18" cy="19" r="3" />
       <path d="M8.59 13.51l6.83 3.98M15.41 6.51l-6.82 3.98" />
+    </svg>
+  );
+}
+
+function PhoneCallIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
+    </svg>
+  );
+}
+
+function PlusAiEmblemIcon({ className = '' }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 512 512"
+      role="img"
+      aria-label="ذكاء بلس | Plus AI"
+    >
+      <g fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round">
+        <path
+          d="M256 80c26.5 0 48 21.5 48 48v80h80c26.5 0 48 21.5 48 48s-21.5 48-48 48h-80v80c0 26.5-21.5 48-48 48s-48-21.5-48-48v-80h-80c-26.5 0-48-21.5-48-48s21.5-48 48-48h80v-80c0-26.5 21.5-48 48-48z"
+          strokeWidth="24"
+        />
+        <line x1="256" y1="80" x2="256" y2="165" strokeWidth="14" />
+        <line x1="256" y1="347" x2="256" y2="432" strokeWidth="14" />
+        <line x1="80" y1="256" x2="165" y2="256" strokeWidth="14" />
+        <line x1="347" y1="256" x2="432" y2="256" strokeWidth="14" />
+        <path
+          d="M256 150c18 68 38 88 106 106-68 18-88 38-106 106-18-68-38-88-106-106 68-18 88-38 106-106z"
+          strokeWidth="16"
+        />
+      </g>
+      <path
+        d="M256 206c7 30 20 43 50 50-30 7-43 20-50 50-7-30-20-43-50-50 30-7 43-20 50-50z"
+        fill="currentColor"
+      />
     </svg>
   );
 }
@@ -357,7 +400,14 @@ export default function App() {
     plusChars: 0
   }));
   const [shareStatus, setShareStatus] = useState(null);
+  const [verificationStatus, setVerificationStatus] = useState('');
+  const [sendingVerification, setSendingVerification] = useState(false);
+  const [voiceCallOpen, setVoiceCallOpen] = useState(false);
+  const [voiceCallPhase, setVoiceCallPhase] = useState('idle');
   const shareTimerRef = useRef(null);
+  const voiceCallRef = useRef(null);
+  const callLogoRef = useRef(null);
+  const welcomeEmblemRef = useRef(null);
 
   const imageInputRef = useRef(null);
   const pdfInputRef = useRef(null);
@@ -371,8 +421,12 @@ export default function App() {
   const activeScopeRef = useRef(GUEST_SCOPE_KEY);
   const knownRemoteChatIdsRef = useRef(new Set());
   const deletedChatIdsRef = useRef(new Set());
+  const pendingDisplayNameRef = useRef({ uid: null, displayName: '' });
+  const healedProfileUidsRef = useRef(new Set());
   const chatsRef = useRef(chats);
   chatsRef.current = chats;
+  const activeChatIdRef = useRef(activeChatId);
+  activeChatIdRef.current = activeChatId;
 
   const isSpeechSupported = Boolean(
     getSpeechRecognitionConstructor(typeof window !== 'undefined' ? window : null)
@@ -472,6 +526,26 @@ export default function App() {
       });
   }, []);
 
+  const tRef = useRef(t);
+  tRef.current = t;
+
+  useEffect(() => {
+    let active = true;
+    getRedirectResult(auth).catch((err) => {
+      if (!active || !err) return;
+      const hostname = typeof window !== 'undefined' && window.location?.hostname
+        ? window.location.hostname
+        : '';
+      const msg = mapFirebaseAuthError(err, tRef.current, { provider: 'google', hostname });
+      setAuthModalMode('login');
+      setAuthPromptMessage(msg);
+      setAuthModalOpen(true);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
   useEffect(() => {
     let unsubProfile = null;
     let unsubChats = null;
@@ -507,6 +581,7 @@ export default function App() {
         setError('');
         setIsSending(false);
         setCreditsExhaustedHighlight(false);
+        setVerificationStatus('');
       }
       knownRemoteChatIdsRef.current = new Set();
       deletedChatIdsRef.current = new Set();
@@ -536,8 +611,12 @@ export default function App() {
       setActiveChatId(userHydrated.activeChatId);
       setLoadedScopeKey(nextScopeKey);
 
+      const pendingName = pendingDisplayNameRef.current?.uid === firebaseUser.uid
+        ? pendingDisplayNameRef.current.displayName
+        : '';
+
       try {
-        await syncUserProfileOnSignIn(firebaseUser);
+        await syncUserProfileOnSignIn(firebaseUser, { preferredDisplayName: pendingName });
       } catch (err) {
         console.error('Failed syncing user profile:', err);
       }
@@ -568,6 +647,17 @@ export default function App() {
         },
         (subErr) => {
           console.error('User profile subscription error:', subErr);
+        },
+        () => {
+          if (cancelled || activeScopeRef.current !== nextScopeKey) return;
+          if (healedProfileUidsRef.current.has(firebaseUser.uid)) return;
+          healedProfileUidsRef.current.add(firebaseUser.uid);
+          const healName = pendingDisplayNameRef.current?.uid === firebaseUser.uid
+            ? pendingDisplayNameRef.current.displayName
+            : '';
+          syncUserProfileOnSignIn(firebaseUser, { preferredDisplayName: healName }).catch((healErr) => {
+            console.error('Failed healing missing user profile:', healErr);
+          });
         }
       );
 
@@ -968,6 +1058,20 @@ export default function App() {
     setSidebarOpen(false);
   }
 
+  async function handleResendAdminVerification() {
+    if (!currentUser || sendingVerification) return;
+    setSendingVerification(true);
+    setVerificationStatus('');
+    try {
+      await sendEmailVerification(currentUser);
+      setVerificationStatus(t.adminVerificationSentNotice);
+    } catch (err) {
+      setVerificationStatus(mapFirebaseAuthError(err, t));
+    } finally {
+      setSendingVerification(false);
+    }
+  }
+
   async function handleSignOut() {
     try {
       stopVoiceDictation(true);
@@ -1136,25 +1240,13 @@ export default function App() {
     }
   }
 
-  async function handleSubmit(event) {
-    event.preventDefault();
-    if (isListening) {
-      stopVoiceDictation(true);
-    }
-    const trimmed = input.trim();
-    if ((!trimmed && attachments.length === 0) || isSending) return;
-
-    if (!isOnline || (typeof navigator !== 'undefined' && navigator.onLine === false)) {
-      setIsOnline(false);
-      setError(t.offlineSendError);
-      return;
-    }
-
-    if (!currentUser) {
-      openAuthDialog('login', t.authRequiredToSend);
-      return;
-    }
-
+  async function executeChatTurn({
+    promptText,
+    outgoingAttachments = [],
+    messageAttachments = [],
+    extraSystemInstruction = ''
+  }) {
+    const trimmed = typeof promptText === 'string' ? promptText.trim() : '';
     const nowMs = Date.now();
     const todayKey = getLocalDateKey(new Date(nowMs));
     const userLimit = clampDailyLimit(userProfile?.dailyLimit || credits.dailyLimit);
@@ -1166,17 +1258,11 @@ export default function App() {
     ) {
       setCredits(currentCredits);
     }
-    const wantsImage = imageMode || (trimmed && isImageGenerationRequest(trimmed));
-    if (wantsImage && currentCredits.remaining <= 0) {
-      setCreditsExhaustedHighlight(true);
-      setError('');
-      return;
-    }
 
     const useFallbackMode = shouldUseFallbackLiteModel({
       creditsRemaining: currentCredits.remaining,
       globalCapacityExhausted,
-      wantsImage,
+      wantsImage: false,
       selectedModel: activeModelTier
     });
 
@@ -1187,16 +1273,18 @@ export default function App() {
       role: 'user',
       content: userText,
       createdAt: now,
-      attachments: attachments.map(({ name, mimeType, data }) => ({ name, mimeType, data }))
+      attachments: messageAttachments
     };
 
     const ownerUid = currentUser.uid;
-    let targetChatId = activeChatId;
-    let existingMessages = messages;
+    let targetChatId = activeChatIdRef.current;
+    const currentChatObj = targetChatId ? chatsRef.current.find((c) => c.id === targetChatId) : null;
+    let existingMessages = currentChatObj?.messages || [];
     let chatAfterUserMsg = null;
 
-    if (!targetChatId) {
+    if (!targetChatId || !currentChatObj) {
       targetChatId = createId('chat');
+      activeChatIdRef.current = targetChatId;
       const title = userText.slice(0, 48) || t.defaultChatTitle;
       const newChat = {
         id: targetChatId,
@@ -1210,15 +1298,12 @@ export default function App() {
       setActiveChatId(targetChatId);
       existingMessages = [];
     } else {
-      const existingChat = chatsRef.current.find((c) => c.id === targetChatId);
-      if (existingChat) {
-        chatAfterUserMsg = {
-          ...existingChat,
-          updatedAt: now,
-          title: existingChat.messages.length === 0 ? userText.slice(0, 48) : existingChat.title,
-          messages: [...existingChat.messages, userMessage]
-        };
-      }
+      chatAfterUserMsg = {
+        ...currentChatObj,
+        updatedAt: now,
+        title: currentChatObj.messages.length === 0 ? userText.slice(0, 48) : currentChatObj.title,
+        messages: [...currentChatObj.messages, userMessage]
+      };
       setChats((prev) =>
         prev.map((chat) =>
           chat.id === targetChatId
@@ -1237,115 +1322,21 @@ export default function App() {
       syncChatToCloud(ownerUid, chatAfterUserMsg);
     }
 
-    const outgoingAttachments = attachments.map(({ mimeType, data }) => ({ mimeType, data }));
-    setInput('');
-    setAttachments([]);
-    setError('');
-    setCreditsExhaustedHighlight(false);
-
-    if (wantsImage && trimmed) {
-      const imageMessageId = createId('msg');
-      const pendingMessage = {
-        id: imageMessageId,
-        role: 'assistant',
-        type: 'image',
-        content: '',
-        prompt: trimmed,
-        englishPrompt: '',
-        imageUrl: '',
-        imageModel: 'flux',
-        imageSeed: null,
-        imageLoading: true,
-        imageError: false,
-        imageErrorMessage: '',
-        createdAt: Date.now()
-      };
-
-      setChats((prev) =>
-        prev.map((chat) =>
-          chat.id === targetChatId
-            ? { ...chat, updatedAt: Date.now(), messages: [...chat.messages, pendingMessage] }
-            : chat
-        )
-      );
-
-      try {
-        const result = await generateImageViaApi(trimmed);
-        updateMessageInChat(
-          targetChatId,
-          imageMessageId,
-          (m) => ({
-            ...m,
-            englishPrompt: result.englishPrompt,
-            imageUrl: result.imageUrl,
-            imageSeed: result.seed,
-            imageModel: result.model || 'flux',
-            imageError: false,
-            imageErrorMessage: ''
-          }),
-          { syncCloud: true }
-        );
-        setCredits((prev) => {
-          const limit = clampDailyLimit(userProfile?.dailyLimit || prev.dailyLimit);
-          const next = consumeOneCredit(prev, getLocalDateKey(), Date.now(), limit);
-          saveCreditsState(next, getUserCreditsStorageKey(currentUser?.uid || ''));
-          return next;
-        });
-        if (currentUser?.uid && userProfile) {
-          consumeUserCreditInFirestore(currentUser.uid, userProfile).catch((consumeErr) => {
-            console.error('Failed syncing consumed image credit:', consumeErr);
-          });
-        }
-        if (currentUser?.uid && result.promptModel) {
-          const promptChars = result.promptChars || calculateExchangeCharCount(trimmed, result.englishPrompt);
-          recordModelUsageInFirestore(result.promptModel, promptChars)
-            .then((updatedQuotaDoc) => {
-              if (updatedQuotaDoc && userIsAdmin) {
-                setAdminQuotaAnalytics(updatedQuotaDoc);
-              }
-            })
-            .catch((quotaSyncErr) => {
-              console.error('Failed syncing image prompt usage counter to Firestore:', quotaSyncErr);
-            });
-        }
-        scrollToBottom();
-      } catch (err) {
-        const rawErrMsg = err instanceof Error && err.message ? err.message : '';
-        const friendlyErr = isQuotaExhaustedResponse(0, null, rawErrMsg)
-          ? t.globalQuotaExhaustedMessage
-          : (rawErrMsg || t.imageLoadError);
-        if (isQuotaExhaustedResponse(0, null, rawErrMsg)) {
-          setGlobalCapacityExhausted(true);
-        }
-        updateMessageInChat(
-          targetChatId,
-          imageMessageId,
-          (m) => ({
-            ...m,
-            imageLoading: false,
-            imageError: true,
-            imageErrorMessage: friendlyErr
-          }),
-          { syncCloud: true }
-        );
-      }
-      return;
-    }
-
     setIsSending(true);
     try {
       const historyPayload = buildChatHistoryPayload([...existingMessages, userMessage], 10);
       if (historyPayload.length === 0) {
-        return;
+        return { replyText: '' };
       }
 
+      const systemText = extraSystemInstruction || settings.systemInstruction.trim();
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           messages: historyPayload,
           attachments: outgoingAttachments.length ? outgoingAttachments : undefined,
-          systemInstruction: settings.systemInstruction.trim() || undefined,
+          systemInstruction: systemText || undefined,
           selectedModel: activeModelTier,
           model: useFallbackMode ? GEMINI_FALLBACK_LITE_MODEL_ID : GEMINI_HYDROGEN_MODEL_ID,
           useFallbackOnly: useFallbackMode,
@@ -1509,17 +1500,222 @@ export default function App() {
           return updated;
         })
       );
+
+      return { replyText };
     } catch (err) {
       const msg = err instanceof Error && err.message ? err.message : t.genericError;
       if (isQuotaExhaustedResponse(0, null, msg)) {
         setGlobalCapacityExhausted(true);
         setError(t.globalQuotaExhaustedMessage);
-      } else {
-        setError(msg);
+        return { error: t.globalQuotaExhaustedMessage };
       }
+      setError(msg);
+      return { error: msg };
     } finally {
       setIsSending(false);
     }
+  }
+
+  function handleOpenVoiceCall() {
+    if (isListening) {
+      stopVoiceDictation(true);
+    }
+    setAttachMenuOpen(false);
+    setModelMenuOpen(false);
+    setError('');
+    setVoiceCallOpen((prev) => !prev);
+  }
+
+  async function handleSendVoiceTurn(spokenText) {
+    if (!currentUser) {
+      return { error: t.authRequiredToSend };
+    }
+    const voiceInstruction = buildVoiceSystemInstruction(settings.systemInstruction, langMeta.code);
+    return executeChatTurn({
+      promptText: spokenText,
+      extraSystemInstruction: voiceInstruction
+    });
+  }
+
+  async function handleSubmit(event) {
+    event.preventDefault();
+    if (isListening) {
+      stopVoiceDictation(true);
+    }
+    const trimmed = input.trim();
+    if ((!trimmed && attachments.length === 0) || isSending) return;
+
+    if (!isOnline || (typeof navigator !== 'undefined' && navigator.onLine === false)) {
+      setIsOnline(false);
+      setError(t.offlineSendError);
+      return;
+    }
+
+    if (!currentUser) {
+      openAuthDialog('login', t.authRequiredToSend);
+      return;
+    }
+
+    const nowMs = Date.now();
+    const todayKey = getLocalDateKey(new Date(nowMs));
+    const userLimit = clampDailyLimit(userProfile?.dailyLimit || credits.dailyLimit);
+    const currentCredits = normalizeCreditsState(credits, todayKey, nowMs, userLimit);
+    const wantsImage = imageMode || (trimmed && isImageGenerationRequest(trimmed));
+    if (wantsImage && currentCredits.remaining <= 0) {
+      setCreditsExhaustedHighlight(true);
+      setError('');
+      return;
+    }
+
+    const outgoingAttachments = attachments.map(({ mimeType, data }) => ({ mimeType, data }));
+    const messageAttachments = attachments.map(({ name, mimeType, data }) => ({ name, mimeType, data }));
+    setInput('');
+    setAttachments([]);
+    setError('');
+    setCreditsExhaustedHighlight(false);
+
+    if (wantsImage && trimmed) {
+      const userText = trimmed;
+      const now = Date.now();
+      const userMessage = {
+        id: createId('msg'),
+        role: 'user',
+        content: userText,
+        createdAt: now,
+        attachments: messageAttachments
+      };
+      const ownerUid = currentUser.uid;
+      let targetChatId = activeChatIdRef.current;
+      const currentChatObj = targetChatId ? chatsRef.current.find((c) => c.id === targetChatId) : null;
+      let chatAfterUserMsg = null;
+
+      if (!targetChatId || !currentChatObj) {
+        targetChatId = createId('chat');
+        activeChatIdRef.current = targetChatId;
+        const newChat = {
+          id: targetChatId,
+          title: userText.slice(0, 48) || t.defaultChatTitle,
+          createdAt: now,
+          updatedAt: now,
+          messages: [userMessage]
+        };
+        chatAfterUserMsg = newChat;
+        setChats((prev) => [newChat, ...prev]);
+        setActiveChatId(targetChatId);
+      } else {
+        chatAfterUserMsg = {
+          ...currentChatObj,
+          updatedAt: now,
+          title: currentChatObj.messages.length === 0 ? userText.slice(0, 48) : currentChatObj.title,
+          messages: [...currentChatObj.messages, userMessage]
+        };
+        setChats((prev) =>
+          prev.map((chat) => (chat.id === targetChatId ? chatAfterUserMsg : chat))
+        );
+      }
+
+      if (chatAfterUserMsg) {
+        syncChatToCloud(ownerUid, chatAfterUserMsg);
+      }
+
+      const imageMessageId = createId('msg');
+      const pendingMessage = {
+        id: imageMessageId,
+        role: 'assistant',
+        type: 'image',
+        content: '',
+        prompt: trimmed,
+        englishPrompt: '',
+        imageUrl: '',
+        imageModel: 'flux',
+        imageSeed: null,
+        imageLoading: true,
+        imageError: false,
+        imageErrorMessage: '',
+        createdAt: Date.now()
+      };
+
+      setChats((prev) =>
+        prev.map((chat) =>
+          chat.id === targetChatId
+            ? { ...chat, updatedAt: Date.now(), messages: [...chat.messages, pendingMessage] }
+            : chat
+        )
+      );
+
+      try {
+        const result = await generateImageViaApi(trimmed);
+        updateMessageInChat(
+          targetChatId,
+          imageMessageId,
+          (m) => ({
+            ...m,
+            englishPrompt: result.englishPrompt,
+            imageUrl: result.imageUrl,
+            imageSeed: result.seed,
+            imageModel: result.model || 'flux',
+            imageError: false,
+            imageErrorMessage: ''
+          }),
+          { syncCloud: true }
+        );
+        setCredits((prev) => {
+          const limit = clampDailyLimit(userProfile?.dailyLimit || prev.dailyLimit);
+          const next = consumeOneCredit(prev, getLocalDateKey(), Date.now(), limit);
+          saveCreditsState(next, getUserCreditsStorageKey(currentUser?.uid || ''));
+          return next;
+        });
+        if (currentUser?.uid && userProfile) {
+          consumeUserCreditInFirestore(currentUser.uid, userProfile).catch((consumeErr) => {
+            console.error('Failed syncing consumed image credit:', consumeErr);
+          });
+        }
+        if (currentUser?.uid && result.promptModel) {
+          const promptChars = result.promptChars || calculateExchangeCharCount(trimmed, result.englishPrompt);
+          recordModelUsageInFirestore(result.promptModel, promptChars)
+            .then((updatedQuotaDoc) => {
+              if (updatedQuotaDoc && userIsAdmin) {
+                setAdminQuotaAnalytics(updatedQuotaDoc);
+              }
+            })
+            .catch((quotaSyncErr) => {
+              console.error('Failed syncing image prompt usage counter to Firestore:', quotaSyncErr);
+            });
+        }
+        scrollToBottom();
+      } catch (err) {
+        const rawErrMsg = err instanceof Error && err.message ? err.message : '';
+        const friendlyErr = isQuotaExhaustedResponse(0, null, rawErrMsg)
+          ? t.globalQuotaExhaustedMessage
+          : (rawErrMsg || t.imageLoadError);
+        if (isQuotaExhaustedResponse(0, null, rawErrMsg)) {
+          setGlobalCapacityExhausted(true);
+        }
+        updateMessageInChat(
+          targetChatId,
+          imageMessageId,
+          (m) => ({
+            ...m,
+            imageLoading: false,
+            imageError: true,
+            imageErrorMessage: friendlyErr
+          }),
+          { syncCloud: true }
+        );
+      }
+      return;
+    }
+
+    if (voiceCallOpen && !wantsImage && outgoingAttachments.length === 0 && trimmed && voiceCallRef.current) {
+      await voiceCallRef.current.submitTextTurn(trimmed);
+      return;
+    }
+
+    await executeChatTurn({
+      promptText: trimmed,
+      outgoingAttachments,
+      messageAttachments
+    });
   }
 
   function handleKeyDown(event) {
@@ -1748,8 +1944,20 @@ export default function App() {
               </div>
 
               {userIsUnverifiedAdmin && (
-                <div className="auth-error" role="status">
-                  {t.adminVerifyEmailNotice}
+                <div className="auth-error sidebar-verify-notice" role="status">
+                  <span>{t.adminVerifyEmailNotice}</span>
+                  <button
+                    type="button"
+                    className="sidebar-verify-btn"
+                    data-testid="resend-verification-button"
+                    disabled={sendingVerification}
+                    onClick={handleResendAdminVerification}
+                  >
+                    {sendingVerification ? t.authSubmitting : t.adminResendVerificationButton}
+                  </button>
+                  {verificationStatus && (
+                    <span className="sidebar-verify-status">{verificationStatus}</span>
+                  )}
                 </div>
               )}
 
@@ -1869,6 +2077,20 @@ export default function App() {
       </header>
 
       <main className="chat-main">
+        <div className="chat-nebula-bg" aria-hidden="true">
+          <span className="nebula-orb nebula-orb-blue" />
+          <span className="nebula-orb nebula-orb-pink" />
+        </div>
+
+        {(voiceCallOpen || messages.length === 0) && (
+          <VoiceWaveCanvas
+            active={voiceCallOpen}
+            callPhase={voiceCallPhase}
+            darkMode={settings.darkMode}
+            logoRef={voiceCallOpen ? callLogoRef : welcomeEmblemRef}
+          />
+        )}
+
         {!isOnline && (
           <div className="offline-banner" role="status">
             <span className="offline-dot" aria-hidden="true" />
@@ -1876,10 +2098,29 @@ export default function App() {
           </div>
         )}
 
-        <div className={`conversation-area ${messages.length === 0 ? 'conversation-empty' : ''}`}>
+        {voiceCallOpen ? (
+          <VoiceCallModal
+            ref={voiceCallRef}
+            open={voiceCallOpen}
+            onClose={() => setVoiceCallOpen(false)}
+            isOnline={isOnline}
+            currentUser={currentUser}
+            onRequireAuth={() => openAuthDialog('login', t.authRequiredToSend)}
+            onSendVoiceTurn={handleSendVoiceTurn}
+            onPhaseChange={setVoiceCallPhase}
+            langCode={langMeta.code}
+            t={t}
+            EmblemIcon={PlusAiEmblemIcon}
+            logoRef={callLogoRef}
+          />
+        ) : (
+          <div className={`conversation-area ${messages.length === 0 ? 'conversation-empty' : ''}`}>
           {messages.length === 0 ? (
             <div className="welcome-card">
-              <img className="welcome-logo" src="/logo.png?v=6" alt="Plus AI" />
+              <div ref={welcomeEmblemRef} className="welcome-emblem-stage" data-testid="welcome-emblem-stage">
+                <div className="welcome-emblem-aura" aria-hidden="true" />
+                <PlusAiEmblemIcon className="welcome-emblem-svg" />
+              </div>
               <h1>{t.welcomeTitle}</h1>
               <p>{t.welcomeSubtitle}</p>
               {!currentUser && (
@@ -2002,9 +2243,11 @@ export default function App() {
               )}
             </div>
           )}
-        </div>
+          </div>
+        )}
 
         <div className="composer-area">
+          <div className="composer-inner">
           {error && (
             <div
               className={error === t.globalQuotaExhaustedMessage ? 'global-quota-notice' : 'chat-error'}
@@ -2209,6 +2452,18 @@ export default function App() {
             </button>
 
             <button
+              type="button"
+              data-testid="voice-call-button"
+              className={`ui-icon-button call-button ${voiceCallOpen ? 'call-button-active' : ''}`}
+              onClick={handleOpenVoiceCall}
+              aria-pressed={voiceCallOpen}
+              aria-label={t.voiceCallStart}
+              title={t.voiceCallStart}
+            >
+              <PhoneCallIcon />
+            </button>
+
+            <button
               type="submit"
               className="send-button"
               disabled={isSending || (!input.trim() && attachments.length === 0)}
@@ -2247,6 +2502,7 @@ export default function App() {
           </div>
 
           <p className="composer-disclaimer">{t.disclaimer}</p>
+          </div>
         </div>
       </main>
 
@@ -2371,9 +2627,20 @@ export default function App() {
           setAuthModalOpen(false);
           setAuthPromptMessage('');
         }}
-        onSuccess={() => {
+        onSuccess={(signedInUser, meta) => {
           setAuthPromptMessage('');
           setError('');
+          if (meta?.preferredDisplayName && signedInUser?.uid) {
+            pendingDisplayNameRef.current = {
+              uid: signedInUser.uid,
+              displayName: meta.preferredDisplayName
+            };
+            syncUserProfileOnSignIn(signedInUser, {
+              preferredDisplayName: meta.preferredDisplayName
+            }).catch((syncErr) => {
+              console.error('Failed syncing preferred displayName:', syncErr);
+            });
+          }
         }}
         t={t}
       />

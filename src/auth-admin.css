@@ -324,13 +324,20 @@
 }
 
 .chat-dark .welcome-auth-button {
-  color: #17191f;
-  background: #f1f3f6;
+  color: #f8fafc;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  backdrop-filter: blur(10px);
 }
 
 .welcome-auth-button:hover {
   transform: translateY(-1px);
-  opacity: .92;
+  opacity: .94;
+}
+
+.chat-dark .welcome-auth-button:hover {
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(147, 197, 253, 0.42);
 }
 
 /* Auth Modal */
@@ -490,10 +497,45 @@
   gap: 5px;
 }
 
+.auth-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 .auth-field label {
   color: var(--text);
   font-size: 12px;
   font-weight: 600;
+}
+
+.auth-forgot-link,
+.auth-back-link {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: #5b4cc9;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.auth-forgot-link:hover:not(:disabled),
+.auth-back-link:hover:not(:disabled) {
+  text-decoration: underline;
+}
+
+.auth-back-link {
+  justify-self: center;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+.chat-dark .auth-forgot-link,
+.chat-dark .auth-back-link {
+  color: #b7abff;
 }
 
 .auth-field input {
@@ -527,6 +569,44 @@
   border-color: #60383d;
   color: #ffb4ad;
   background: #321f22;
+}
+
+.auth-success {
+  padding: 10px 12px;
+  border: 1px solid #39a8794d;
+  border-radius: 11px;
+  color: #166534;
+  background: #ecfdf3;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.chat-dark .auth-success {
+  border-color: #39a87955;
+  color: #86efac;
+  background: #132a1f;
+}
+
+.sidebar-verify-notice {
+  display: grid;
+  gap: 8px;
+}
+
+.sidebar-verify-btn {
+  min-height: 32px;
+  padding: 4px 10px;
+  border: 1px solid currentColor;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.sidebar-verify-btn:hover:not(:disabled) {
+  opacity: .85;
 }
 
 .auth-submit-btn {

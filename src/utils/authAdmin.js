@@ -274,11 +274,48 @@ export function filterUsersDirectory(users = [], { query = '', paidOnly = false 
   return filterAndSortUsers(scoped, query);
 }
 
-export function mapFirebaseAuthError(error, t = {}) {
+export function validateAuthFormInput({ mode = 'login', email = '', password = '' } = {}) {
+  const cleanEmail = sanitizeEmail(email);
+  if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+    return { ok: false, errorKey: 'authErrInvalidEmail', email: cleanEmail };
+  }
+  if (mode === 'forgot') {
+    return { ok: true, email: cleanEmail };
+  }
+  const safePassword = typeof password === 'string' ? password : '';
+  if (safePassword.length < 6) {
+    return { ok: false, errorKey: 'authErrWeakPassword', email: cleanEmail };
+  }
+  return { ok: true, email: cleanEmail };
+}
+
+export function shouldFallbackToRedirectSignIn(error, win = typeof window !== 'undefined' ? window : null) {
+  const code = error?.code || '';
+  if (code !== 'auth/popup-blocked' && code !== 'auth/operation-not-supported-in-this-environment') {
+    return false;
+  }
+  if (!win) return false;
+  try {
+    return win.self === win.top;
+  } catch {
+    return false;
+  }
+}
+
+export function mapFirebaseAuthError(error, t = {}, context = {}) {
   const code = error?.code || '';
   const message = error instanceof Error ? error.message : String(error || '');
+  const provider = context?.provider === 'google' ? 'google' : 'email';
+  const hostname = typeof context?.hostname === 'string' && context.hostname.trim()
+    ? context.hostname.trim()
+    : (typeof window !== 'undefined' && window.location?.hostname ? window.location.hostname : '');
 
-  if (code === 'auth/invalid-email') return t.authErrInvalidEmail || 'صيغة البريد الإلكتروني غير صحيحة.';
+  if (code === 'auth/invalid-email' || code === 'auth/missing-email') {
+    return t.authErrInvalidEmail || 'صيغة البريد الإلكتروني غير صحيحة.';
+  }
+  if (code === 'auth/missing-password') {
+    return t.authErrWeakPassword || 'يرجى إدخال كلمة المرور (6 أحرف على الأقل).';
+  }
   if (code === 'auth/user-not-found' || code === 'auth/wrong-password' || code === 'auth/invalid-credential') {
     return t.authErrInvalidCredentials || 'البريد الإلكتروني أو كلمة المرور غير صحيحة.';
   }
@@ -289,7 +326,16 @@ export function mapFirebaseAuthError(error, t = {}) {
     return t.authErrWeakPassword || 'كلمة المرور ضعيفة (يجب أن تكون 6 أحرف على الأقل).';
   }
   if (code === 'auth/operation-not-allowed') {
+    if (provider === 'google') {
+      return t.authErrGoogleNotAllowed || 'تسجيل الدخول عبر Google غير مفعّل بعد في Firebase Authentication. فعّل مزوّد Google من لوحة Firebase.';
+    }
     return t.authErrOperationNotAllowed || 'تسجيل الدخول بالبريد وكلمة المرور غير مفعّل بعد في إعدادات Firebase Authentication. فعّله من لوحة Firebase أو استخدم الدخول السريع عبر Google.';
+  }
+  if (code === 'auth/configuration-not-found' || code === 'auth/invalid-api-key') {
+    return t.authErrConfigNotFound || 'إعدادات Firebase Authentication غير مكتملة لهذا المشروع. تأكد من تفعيل Authentication في لوحة Firebase.';
+  }
+  if (code === 'auth/user-disabled') {
+    return t.authErrUserDisabled || 'تم تعطيل هذا الحساب مؤقتاً. تواصل مع الدعم أو المسؤول.';
   }
   if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
     return t.authErrPopupClosed || 'تم إغلاق نافذة تسجيل الدخول قبل إتمام العملية.';
@@ -297,8 +343,12 @@ export function mapFirebaseAuthError(error, t = {}) {
   if (code === 'auth/popup-blocked') {
     return t.authErrPopupBlocked || 'حظر المتصفح النافذة المنبثقة. اسمح بالنوافذ المنبثقة ثم أعد المحاولة.';
   }
+  if (code === 'auth/operation-not-supported-in-this-environment' || code === 'auth/web-storage-unsupported') {
+    return t.authErrUnsupportedEnv || 'بيئة المتصفح الحالية تمنع نافذة المصادقة المنبثقة أو التخزين المحلي. افتح الموقع مباشرة في المتصفح ثم أعد المحاولة.';
+  }
   if (code === 'auth/unauthorized-domain') {
-    return t.authErrUnauthorizedDomain || 'هذا النطاق غير مصرّح به في Firebase Authentication. أضفه إلى Authorized domains في لوحة Firebase.';
+    const baseMsg = t.authErrUnauthorizedDomain || 'هذا النطاق غير مصرّح به في Firebase Authentication. أضفه إلى Authorized domains في لوحة Firebase.';
+    return hostname ? `${baseMsg} (${hostname})` : baseMsg;
   }
   if (code === 'auth/account-exists-with-different-credential') {
     return t.authErrDifferentCredential || 'يوجد حساب مسجل مسبقاً بنفس البريد عبر طريقة دخول أخرى.';
@@ -306,8 +356,11 @@ export function mapFirebaseAuthError(error, t = {}) {
   if (code === 'auth/too-many-requests') {
     return t.authErrTooManyRequests || 'محاولات متكررة كثيرة. انتظر قليلاً ثم أعد المحاولة.';
   }
-  if (code === 'auth/network-request-failed') {
-    return t.authErrNetwork || 'تعذر الاتصال بالشبكة أثناء المصادقة.';
+  if (code === 'auth/network-request-failed' || code === 'unavailable' || /the client is offline/i.test(message)) {
+    return t.authErrNetwork || 'تعذر الاتصال بالشبكة أثناء المصادقة. تحقق من الاتصال ثم أعد المحاولة.';
+  }
+  if (code === 'auth/internal-error') {
+    return t.authErrInternal || 'حدث خطأ مؤقت في خدمة المصادقة. أعد المحاولة بعد لحظات.';
   }
   return message || t.genericError || 'تعذر إتمام عملية تسجيل الدخول.';
 }

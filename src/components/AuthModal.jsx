@@ -2,12 +2,18 @@ import React, { useEffect, useState } from 'react';
 import {
   createUserWithEmailAndPassword,
   sendEmailVerification,
+  sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signInWithPopup,
+  signInWithRedirect,
   updateProfile
 } from 'firebase/auth';
 import { auth, googleProvider } from '../firebase.js';
-import { mapFirebaseAuthError } from '../utils/authAdmin.js';
+import {
+  mapFirebaseAuthError,
+  shouldFallbackToRedirectSignIn,
+  validateAuthFormInput
+} from '../utils/authAdmin.js';
 
 function GoogleLogoIcon() {
   return (
@@ -46,28 +52,64 @@ export default function AuthModal({
   const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const [infoMsg, setInfoMsg] = useState('');
 
   useEffect(() => {
     if (open) {
       setMode(initialMode);
       setErrorMsg(promptMessage || '');
+      setInfoMsg('');
+      setPassword('');
+      setSubmitting(false);
+    } else {
+      setDisplayName('');
+      setPassword('');
+      setErrorMsg('');
+      setInfoMsg('');
+      setSubmitting(false);
     }
   }, [open, initialMode, promptMessage]);
 
   if (!open) return null;
 
   const isSignUp = mode === 'signup';
+  const isForgot = mode === 'forgot';
+  const currentHostname = typeof window !== 'undefined' && window.location?.hostname
+    ? window.location.hostname
+    : '';
+
+  function switchMode(nextMode) {
+    if (submitting) return;
+    setMode(nextMode);
+    setErrorMsg('');
+    setInfoMsg('');
+    if (nextMode === 'forgot') {
+      setPassword('');
+    }
+  }
 
   async function handleGoogleQuickSignIn() {
     if (submitting) return;
     setErrorMsg('');
+    setInfoMsg('');
     setSubmitting(true);
     try {
       const cred = await signInWithPopup(auth, googleProvider);
       onSuccess?.(cred.user);
       onClose?.();
     } catch (err) {
-      setErrorMsg(mapFirebaseAuthError(err, t));
+      if (shouldFallbackToRedirectSignIn(err, typeof window !== 'undefined' ? window : null)) {
+        try {
+          await signInWithRedirect(auth, googleProvider);
+          return;
+        } catch (redirectErr) {
+          setErrorMsg(
+            mapFirebaseAuthError(redirectErr, t, { provider: 'google', hostname: currentHostname })
+          );
+          return;
+        }
+      }
+      setErrorMsg(mapFirebaseAuthError(err, t, { provider: 'google', hostname: currentHostname }));
     } finally {
       setSubmitting(false);
     }
@@ -77,28 +119,33 @@ export default function AuthModal({
     event.preventDefault();
     if (submitting) return;
 
-    const cleanEmail = email.trim();
-    const cleanName = displayName.trim();
+    const validation = validateAuthFormInput({ mode, email, password });
+    if (!validation.ok) {
+      setInfoMsg('');
+      setErrorMsg(t[validation.errorKey] || t.authErrInvalidEmail);
+      return;
+    }
 
-    if (!cleanEmail) {
-      setErrorMsg(t.authErrInvalidEmail || 'يرجى إدخال البريد الإلكتروني.');
-      return;
-    }
-    if (password.length < 6) {
-      setErrorMsg(t.authErrWeakPassword || 'كلمة المرور يجب أن تكون 6 أحرف على الأقل.');
-      return;
-    }
+    const cleanEmail = validation.email;
+    const cleanName = displayName.trim().slice(0, 100);
 
     setErrorMsg('');
+    setInfoMsg('');
     setSubmitting(true);
     try {
+      if (isForgot) {
+        await sendPasswordResetEmail(auth, cleanEmail);
+        setInfoMsg(t.authResetSentNotice);
+        return;
+      }
+
       if (isSignUp) {
         const cred = await createUserWithEmailAndPassword(auth, cleanEmail, password);
         if (cleanName) {
-          await updateProfile(cred.user, { displayName: cleanName.slice(0, 100) }).catch(() => {});
+          await updateProfile(cred.user, { displayName: cleanName }).catch(() => {});
         }
         await sendEmailVerification(cred.user).catch(() => {});
-        onSuccess?.(cred.user);
+        onSuccess?.(cred.user, { preferredDisplayName: cleanName });
         onClose?.();
       } else {
         const cred = await signInWithEmailAndPassword(auth, cleanEmail, password);
@@ -106,7 +153,7 @@ export default function AuthModal({
         onClose?.();
       }
     } catch (err) {
-      setErrorMsg(mapFirebaseAuthError(err, t));
+      setErrorMsg(mapFirebaseAuthError(err, t, { provider: 'email', hostname: currentHostname }));
     } finally {
       setSubmitting(false);
     }
@@ -128,7 +175,7 @@ export default function AuthModal({
             <img src="/logo.png?v=6" alt="Plus AI" width="38" height="38" />
             <div>
               <h2 id="auth-modal-title">
-                {isSignUp ? t.authSignupTitle : t.authLoginTitle}
+                {isForgot ? t.authForgotTitle : (isSignUp ? t.authSignupTitle : t.authLoginTitle)}
               </h2>
               <p className="auth-subtitle">{t.authSubtitle}</p>
             </div>
@@ -144,51 +191,51 @@ export default function AuthModal({
           </button>
         </div>
 
-        <div className="auth-tabs" role="tablist">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={!isSignUp}
-            className={`auth-tab ${!isSignUp ? 'auth-tab-active' : ''}`}
-            data-testid="auth-tab-login"
-            onClick={() => {
-              setMode('login');
-              setErrorMsg('');
-            }}
-          >
-            {t.authLoginTab}
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={isSignUp}
-            className={`auth-tab ${isSignUp ? 'auth-tab-active' : ''}`}
-            data-testid="auth-tab-signup"
-            onClick={() => {
-              setMode('signup');
-              setErrorMsg('');
-            }}
-          >
-            {t.authSignupTab}
-          </button>
-        </div>
+        {!isForgot && (
+          <>
+            <div className="auth-tabs" role="tablist">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={!isSignUp}
+                disabled={submitting}
+                className={`auth-tab ${!isSignUp ? 'auth-tab-active' : ''}`}
+                data-testid="auth-tab-login"
+                onClick={() => switchMode('login')}
+              >
+                {t.authLoginTab}
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={isSignUp}
+                disabled={submitting}
+                className={`auth-tab ${isSignUp ? 'auth-tab-active' : ''}`}
+                data-testid="auth-tab-signup"
+                onClick={() => switchMode('signup')}
+              >
+                {t.authSignupTab}
+              </button>
+            </div>
 
-        <button
-          type="button"
-          className="auth-google-btn"
-          data-testid="google-quick-signin-btn"
-          onClick={handleGoogleQuickSignIn}
-          disabled={submitting}
-        >
-          <GoogleLogoIcon />
-          <span>{t.authGoogleQuickButton}</span>
-        </button>
+            <button
+              type="button"
+              className="auth-google-btn"
+              data-testid="google-quick-signin-btn"
+              onClick={handleGoogleQuickSignIn}
+              disabled={submitting}
+            >
+              <GoogleLogoIcon />
+              <span>{t.authGoogleQuickButton}</span>
+            </button>
 
-        <div className="auth-divider">
-          <span>{t.authOrDivider}</span>
-        </div>
+            <div className="auth-divider">
+              <span>{t.authOrDivider}</span>
+            </div>
+          </>
+        )}
 
-        <form className="auth-form" onSubmit={handleEmailSubmit}>
+        <form className="auth-form" onSubmit={handleEmailSubmit} noValidate>
           {isSignUp && (
             <div className="auth-field">
               <label htmlFor="auth-display-name">{t.authNameLabel}</label>
@@ -196,8 +243,12 @@ export default function AuthModal({
                 id="auth-display-name"
                 type="text"
                 maxLength={100}
+                disabled={submitting}
                 value={displayName}
-                onChange={(e) => setDisplayName(e.target.value)}
+                onChange={(e) => {
+                  setDisplayName(e.target.value);
+                  if (errorMsg) setErrorMsg('');
+                }}
                 placeholder={t.authNamePlaceholder}
                 autoComplete="name"
               />
@@ -211,33 +262,63 @@ export default function AuthModal({
               type="email"
               maxLength={254}
               required
+              disabled={submitting}
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={(e) => {
+                setEmail(e.target.value);
+                if (errorMsg) setErrorMsg('');
+                if (infoMsg) setInfoMsg('');
+              }}
               placeholder="name@example.com"
               autoComplete="email"
               dir="ltr"
             />
           </div>
 
-          <div className="auth-field">
-            <label htmlFor="auth-password">{t.authPasswordLabel}</label>
-            <input
-              id="auth-password"
-              type="password"
-              minLength={6}
-              maxLength={128}
-              required
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••"
-              autoComplete={isSignUp ? 'new-password' : 'current-password'}
-              dir="ltr"
-            />
-          </div>
+          {!isForgot && (
+            <div className="auth-field">
+              <div className="auth-label-row">
+                <label htmlFor="auth-password">{t.authPasswordLabel}</label>
+                {!isSignUp && (
+                  <button
+                    type="button"
+                    className="auth-forgot-link"
+                    data-testid="auth-forgot-link"
+                    disabled={submitting}
+                    onClick={() => switchMode('forgot')}
+                  >
+                    {t.authForgotLink}
+                  </button>
+                )}
+              </div>
+              <input
+                id="auth-password"
+                type="password"
+                minLength={6}
+                maxLength={128}
+                required
+                disabled={submitting}
+                value={password}
+                onChange={(e) => {
+                  setPassword(e.target.value);
+                  if (errorMsg) setErrorMsg('');
+                }}
+                placeholder="••••••"
+                autoComplete={isSignUp ? 'new-password' : 'current-password'}
+                dir="ltr"
+              />
+            </div>
+          )}
 
           {errorMsg && (
             <div className="auth-error" role="alert" data-testid="auth-error-message">
               {errorMsg}
+            </div>
+          )}
+
+          {infoMsg && (
+            <div className="auth-success" role="status" data-testid="auth-success-message">
+              {infoMsg}
             </div>
           )}
 
@@ -249,8 +330,22 @@ export default function AuthModal({
           >
             {submitting
               ? t.authSubmitting
-              : (isSignUp ? t.authCreateAccountButton : t.authLoginButton)}
+              : (isForgot
+                  ? t.authResetButton
+                  : (isSignUp ? t.authCreateAccountButton : t.authLoginButton))}
           </button>
+
+          {isForgot && (
+            <button
+              type="button"
+              className="auth-back-link"
+              data-testid="auth-back-to-login"
+              disabled={submitting}
+              onClick={() => switchMode('login')}
+            >
+              {t.authBackToLogin}
+            </button>
+          )}
         </form>
 
         <p className="auth-benefit-note">{t.authDailyBenefitNote}</p>

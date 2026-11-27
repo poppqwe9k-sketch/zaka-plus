@@ -22,7 +22,11 @@ function createMemoryStorage() {
   };
 }
 
-test('normalizes legacy settings to default بلس (plus-fast) while preserving plus-max', () => {
+test('normalizes legacy settings to default بلس (plus-fast) while preserving plus-max and dark mode default', () => {
+  const defaults = normalizeSettings({});
+  assert.equal(defaults.darkMode, true);
+  assert.equal(normalizeSettings({ darkMode: false }).darkMode, false);
+
   const migrated = normalizeSettings({
     lang: 'ar',
     darkMode: true,

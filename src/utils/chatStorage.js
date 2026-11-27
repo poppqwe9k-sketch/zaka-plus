@@ -55,7 +55,7 @@ export function filterChatsByTitle(chats = [], query = '') {
 export function getDefaultSettings(lang = 'ar') {
   return {
     lang: isSupportedLanguage(lang) ? lang : 'ar',
-    darkMode: false,
+    darkMode: true,
     deepThinking: false,
     selectedModel: DEFAULT_MODEL_TIER,
     systemInstruction: ''
@@ -66,7 +66,7 @@ export function normalizeSettings(rawSettings = {}) {
   const defaults = getDefaultSettings(rawSettings?.lang);
   return {
     lang: isSupportedLanguage(rawSettings?.lang) ? rawSettings.lang : defaults.lang,
-    darkMode: Boolean(rawSettings?.darkMode),
+    darkMode: typeof rawSettings?.darkMode === 'boolean' ? rawSettings.darkMode : defaults.darkMode,
     deepThinking: Boolean(rawSettings?.deepThinking),
     selectedModel: normalizeModelTier(rawSettings?.selectedModel),
     systemInstruction: typeof rawSettings?.systemInstruction === 'string'

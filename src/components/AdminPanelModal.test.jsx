@@ -128,9 +128,9 @@ test('AdminPanelModal renders independent Plus Plus (200) and Plus (10,000) capa
   assert.match(expandedHtml, /haider@example\.com/);
 });
 
-test('AuthModal renders email/password inputs, login/signup tabs, and Google quick sign-in', () => {
+test('AuthModal renders email/password inputs, login/signup tabs, forgot-password link, and Google quick sign-in', () => {
   const t = getTranslation('ar');
-  const html = renderToStaticMarkup(
+  const signupHtml = renderToStaticMarkup(
     <AuthModal
       open={true}
       initialMode="signup"
@@ -141,10 +141,38 @@ test('AuthModal renders email/password inputs, login/signup tabs, and Google qui
     />
   );
 
-  assert.match(html, /الدخول السريع عبر Google/);
-  assert.match(html, /تسجيل الدخول/);
-  assert.match(html, /إنشاء حساب/);
-  assert.match(html, /البريد الإلكتروني/);
-  assert.match(html, /كلمة المرور/);
-  assert.match(html, /3 رسائل مجانية يومياً/);
+  assert.match(signupHtml, /الدخول السريع عبر Google/);
+  assert.match(signupHtml, /تسجيل الدخول/);
+  assert.match(signupHtml, /إنشاء حساب/);
+  assert.match(signupHtml, /البريد الإلكتروني/);
+  assert.match(signupHtml, /كلمة المرور/);
+  assert.match(signupHtml, /3 رسائل مجانية يومياً/);
+
+  const loginHtml = renderToStaticMarkup(
+    <AuthModal
+      open={true}
+      initialMode="login"
+      promptMessage=""
+      onClose={() => {}}
+      onSuccess={() => {}}
+      t={t}
+    />
+  );
+  assert.match(loginHtml, /data-testid="auth-forgot-link"/);
+  assert.match(loginHtml, /نسيت كلمة المرور؟/);
+
+  const forgotHtml = renderToStaticMarkup(
+    <AuthModal
+      open={true}
+      initialMode="forgot"
+      promptMessage=""
+      onClose={() => {}}
+      onSuccess={() => {}}
+      t={t}
+    />
+  );
+  assert.match(forgotHtml, /استعادة كلمة المرور/);
+  assert.match(forgotHtml, /إرسال رابط إعادة التعيين/);
+  assert.match(forgotHtml, /data-testid="auth-back-to-login"/);
+  assert.doesNotMatch(forgotHtml, /id="auth-password"/);
 });

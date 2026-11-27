@@ -1,12 +1,12 @@
+import './styles.css';
+import './app-enhancements.css';
+import './logo-image.css';
+import './pwa.css';
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App.jsx';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
 import PwaInstall from './PwaInstall.jsx';
-import './styles.css';
-import './app-enhancements.css';
-import './logo-image.css';
-import './pwa.css';
 
 const rootElement = document.getElementById('root');
 if (rootElement) {
