@@ -53,12 +53,16 @@ export default function AuthModal({
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [infoMsg, setInfoMsg] = useState('');
+  const [unauthorizedDomain, setUnauthorizedDomain] = useState('');
+  const [domainCopied, setDomainCopied] = useState(false);
 
   useEffect(() => {
     if (open) {
       setMode(initialMode);
       setErrorMsg(promptMessage || '');
       setInfoMsg('');
+      setUnauthorizedDomain('');
+      setDomainCopied(false);
       setPassword('');
       setSubmitting(false);
     } else {
@@ -66,6 +70,8 @@ export default function AuthModal({
       setPassword('');
       setErrorMsg('');
       setInfoMsg('');
+      setUnauthorizedDomain('');
+      setDomainCopied(false);
       setSubmitting(false);
     }
   }, [open, initialMode, promptMessage]);
@@ -83,8 +89,21 @@ export default function AuthModal({
     setMode(nextMode);
     setErrorMsg('');
     setInfoMsg('');
+    setUnauthorizedDomain('');
+    setDomainCopied(false);
     if (nextMode === 'forgot') {
       setPassword('');
+    }
+  }
+
+  async function handleCopyDomain() {
+    if (!unauthorizedDomain || typeof navigator === 'undefined' || !navigator.clipboard?.writeText) return;
+    try {
+      await navigator.clipboard.writeText(unauthorizedDomain);
+      setDomainCopied(true);
+      window.setTimeout(() => setDomainCopied(false), 2000);
+    } catch {
+      // Ignore clipboard failures.
     }
   }
 
@@ -92,6 +111,8 @@ export default function AuthModal({
     if (submitting) return;
     setErrorMsg('');
     setInfoMsg('');
+    setUnauthorizedDomain('');
+    setDomainCopied(false);
     setSubmitting(true);
     try {
       const cred = await signInWithPopup(auth, googleProvider);
@@ -103,11 +124,17 @@ export default function AuthModal({
           await signInWithRedirect(auth, googleProvider);
           return;
         } catch (redirectErr) {
+          if (redirectErr?.code === 'auth/unauthorized-domain' && currentHostname) {
+            setUnauthorizedDomain(currentHostname);
+          }
           setErrorMsg(
             mapFirebaseAuthError(redirectErr, t, { provider: 'google', hostname: currentHostname })
           );
           return;
         }
+      }
+      if (err?.code === 'auth/unauthorized-domain' && currentHostname) {
+        setUnauthorizedDomain(currentHostname);
       }
       setErrorMsg(mapFirebaseAuthError(err, t, { provider: 'google', hostname: currentHostname }));
     } finally {
@@ -131,6 +158,8 @@ export default function AuthModal({
 
     setErrorMsg('');
     setInfoMsg('');
+    setUnauthorizedDomain('');
+    setDomainCopied(false);
     setSubmitting(true);
     try {
       if (isForgot) {
@@ -312,7 +341,25 @@ export default function AuthModal({
 
           {errorMsg && (
             <div className="auth-error" role="alert" data-testid="auth-error-message">
-              {errorMsg}
+              <div>{errorMsg}</div>
+              {unauthorizedDomain && (
+                <div className="auth-domain-helper">
+                  <div className="auth-domain-hint">{t.authUnauthorizedDomainHint}</div>
+                  <div className="auth-domain-copy-row">
+                    <code className="auth-domain-code" dir="ltr" data-testid="auth-unauthorized-domain-code">
+                      {unauthorizedDomain}
+                    </code>
+                    <button
+                      type="button"
+                      className="auth-domain-copy-btn"
+                      data-testid="auth-copy-domain-btn"
+                      onClick={handleCopyDomain}
+                    >
+                      {domainCopied ? t.authDomainCopiedNotice : t.authCopyDomainBtn}
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

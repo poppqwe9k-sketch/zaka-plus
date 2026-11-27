@@ -24,18 +24,11 @@ export default function VoiceWaveCanvas({
     let height = 0;
     let emblemCenterY = null;
     let phase = 0;
-    let currentAmplitude = 7;
-    let targetAmplitude = 7;
+    let currentAmplitude = 4;
+    let targetAmplitude = 4;
     let rafId = 0;
+    let pulseTimer = 0;
     let lastDrawTime = 0;
-
-    const particles = Array.from({ length: 44 }, () => ({
-      rx: Math.random(),
-      ry: (Math.random() - 0.5) * 180,
-      size: Math.random() * 1.8 + 0.6,
-      speedX: (Math.random() - 0.5) * 0.0007,
-      alpha: Math.random() * 0.65 + 0.2
-    }));
 
     function measureCenterY() {
       if (!logoRef?.current) {
@@ -54,21 +47,88 @@ export default function VoiceWaveCanvas({
       emblemCenterY = null;
     }
 
+    function drawStaticLine() {
+      const { darkMode: isDark } = stateRef.current;
+      ctx.clearRect(0, 0, width, height);
+      const centerY = emblemCenterY !== null ? emblemCenterY : height * 0.44;
+      ctx.beginPath();
+      ctx.moveTo(0, centerY);
+      ctx.lineTo(width, centerY);
+      ctx.strokeStyle = isDark ? 'rgba(255, 255, 255, 0.18)' : 'rgba(24, 28, 38, 0.12)';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
+
     function updateSize() {
       const parent = canvas.parentElement;
       const nextW = parent ? parent.clientWidth : window.innerWidth;
       const nextH = parent ? parent.clientHeight : window.innerHeight;
       width = Math.max(1, nextW);
       height = Math.max(1, nextH);
-      const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
-      const targetCanvasW = Math.floor(width * dpr);
-      const targetCanvasH = Math.floor(height * dpr);
-      if (canvas.width !== targetCanvasW || canvas.height !== targetCanvasH) {
-        canvas.width = targetCanvasW;
-        canvas.height = targetCanvasH;
+      if (canvas.width !== width || canvas.height !== height) {
+        canvas.width = width;
+        canvas.height = height;
       }
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       measureCenterY();
+      if (!stateRef.current.active || prefersReducedMotion) {
+        drawStaticLine();
+      }
+    }
+
+    function animate(now = performance.now()) {
+      if (!stateRef.current.active || prefersReducedMotion) return;
+
+      if (lastDrawTime && (now - lastDrawTime) < 24) {
+        rafId = window.requestAnimationFrame(animate);
+        return;
+      }
+      lastDrawTime = now;
+
+      if (typeof document !== 'undefined' && document.hidden) {
+        rafId = window.requestAnimationFrame(animate);
+        return;
+      }
+
+      const { darkMode: isDark } = stateRef.current;
+      const rgb = isDark ? '255, 255, 255' : '24, 28, 38';
+
+      ctx.clearRect(0, 0, width, height);
+      currentAmplitude += (targetAmplitude - currentAmplitude) * 0.16;
+      phase += 0.09;
+
+      const centerY = emblemCenterY !== null ? emblemCenterY : height * 0.44;
+      const centerX = width * 0.5;
+      const maxDist = Math.max(120, width * 0.45);
+
+      if (logoRef?.current) {
+        const scale = 1 + (currentAmplitude / 500);
+        logoRef.current.style.transform = `scale(${scale.toFixed(3)})`;
+      }
+
+      const layers = [
+        { freq: 0.014, speed: 1, alpha: isDark ? 0.85 : 0.42, width: 2, mult: 1 },
+        { freq: 0.024, speed: -1.2, alpha: isDark ? 0.35 : 0.18, width: 1.2, mult: 0.7 }
+      ];
+
+      for (let i = 0; i < layers.length; i += 1) {
+        const layer = layers[i];
+        ctx.beginPath();
+        for (let x = 0; x <= width; x += 6) {
+          const dist = Math.abs(x - centerX);
+          const env = Math.max(0, 1 - (dist / maxDist));
+          const y = Math.sin(x * layer.freq + phase * layer.speed) * currentAmplitude * layer.mult * env;
+          if (x === 0) {
+            ctx.moveTo(x, centerY + y);
+          } else {
+            ctx.lineTo(x, centerY + y);
+          }
+        }
+        ctx.strokeStyle = `rgba(${rgb}, ${layer.alpha})`;
+        ctx.lineWidth = layer.width;
+        ctx.stroke();
+      }
+
+      rafId = window.requestAnimationFrame(animate);
     }
 
     updateSize();
@@ -80,149 +140,30 @@ export default function VoiceWaveCanvas({
       window.addEventListener('resize', updateSize);
     }
 
-    const burstTimer = window.setInterval(() => {
-      const { active: isCall, callPhase: p } = stateRef.current;
-      if (!isCall) {
-        targetAmplitude = 6.5;
-      } else if (p === 'speaking') {
-        const isBurst = Math.random() > 0.22;
-        targetAmplitude = isBurst ? (Math.random() * 68 + 38) : 18;
-      } else if (p === 'listening' || p === 'recording') {
-        targetAmplitude = Math.random() * 24 + 20;
-      } else if (p === 'thinking' || p === 'connecting') {
-        targetAmplitude = 18;
-      } else {
-        targetAmplitude = 9;
-      }
-      measureCenterY();
-    }, 170);
-
-    function drawFrame(now = performance.now()) {
-      const { active: isCall, callPhase: p, darkMode: isDark } = stateRef.current;
-      if (!prefersReducedMotion) {
-        const minInterval = isCall ? 24 : 36;
-        if (lastDrawTime && (now - lastDrawTime) < minInterval) {
-          rafId = window.requestAnimationFrame(drawFrame);
-          return;
-        }
-        lastDrawTime = now;
-      }
-
-      if (typeof document !== 'undefined' && document.hidden) {
-        if (!prefersReducedMotion) {
-          rafId = window.requestAnimationFrame(drawFrame);
-        }
-        return;
-      }
-
-      const rgb = isDark ? '255, 255, 255' : '24, 28, 38';
-      const isEnergetic = isCall && (p === 'speaking' || p === 'listening' || p === 'recording');
-
-      ctx.clearRect(0, 0, width, height);
-
-      currentAmplitude += (targetAmplitude - currentAmplitude) * 0.16;
-      phase += isEnergetic ? 0.1 : (isCall ? 0.055 : 0.032);
-
-      const centerY = emblemCenterY !== null ? emblemCenterY : height * 0.44;
-      const centerX = width * 0.5;
-
-      if (logoRef?.current) {
-        if (isCall && !prefersReducedMotion) {
-          const scale = 1 + (currentAmplitude / 450);
-          logoRef.current.style.transform = `scale(${scale.toFixed(3)})`;
+    if (active && !prefersReducedMotion) {
+      pulseTimer = window.setInterval(() => {
+        const { callPhase: p } = stateRef.current;
+        if (p === 'speaking') {
+          targetAmplitude = Math.random() > 0.25 ? (Math.random() * 65 + 30) : 12;
+        } else if (p === 'listening' || p === 'recording') {
+          targetAmplitude = Math.random() * 24 + 20;
+        } else if (p === 'thinking' || p === 'connecting') {
+          targetAmplitude = 16;
         } else {
-          logoRef.current.style.transform = 'scale(1)';
+          targetAmplitude = 14;
         }
+        measureCenterY();
+      }, 170);
+      animate();
+    } else {
+      if (logoRef?.current) {
+        logoRef.current.style.transform = 'scale(1)';
       }
-
-      // Floating glowing particles
-      for (const pt of particles) {
-        if (!prefersReducedMotion) {
-          pt.rx += pt.speedX * (isEnergetic ? 2.5 : 0.6);
-          if (pt.rx < 0) pt.rx = 1;
-          if (pt.rx > 1) pt.rx = 0;
-        }
-        const px = pt.rx * width;
-        const spread = isEnergetic ? currentAmplitude * 1.35 : 34;
-        const drawY = centerY + Math.sin(px * 0.01 + phase) * (spread * 0.6) + pt.ry * 0.35;
-
-        ctx.beginPath();
-        ctx.arc(px, drawY, pt.size, 0, Math.PI * 2);
-        const alpha = isEnergetic ? pt.alpha : pt.alpha * (isDark ? 0.28 : 0.16);
-        ctx.fillStyle = `rgba(${rgb}, ${alpha})`;
-        ctx.fill();
-      }
-
-      // Layered acoustic wave lines (fast 2-pass soft glow without CPU shadowBlur)
-      const waveLayers = [
-        { freq: 0.012, speed: 1, alpha: isDark ? (isCall ? 0.88 : 0.24) : (isCall ? 0.45 : 0.14), lineWidth: isCall ? 2 : 1.25, ampMult: 1.0, halo: isCall },
-        { freq: 0.022, speed: -1.3, alpha: isDark ? (isCall ? 0.44 : 0.14) : (isCall ? 0.25 : 0.09), lineWidth: 1.15, ampMult: 0.75, halo: false },
-        { freq: 0.008, speed: 0.7, alpha: isDark ? (isCall ? 0.24 : 0.09) : (isCall ? 0.15 : 0.06), lineWidth: 1, ampMult: 1.25, halo: false }
-      ];
-
-      const step = width > 900 ? 6 : 4;
-      const maxDist = Math.max(120, width * 0.48);
-
-      for (const layer of waveLayers) {
-        ctx.beginPath();
-        for (let x = 0; x <= width; x += step) {
-          const distFromCenter = Math.abs(x - centerX);
-          const envelope = Math.max(0, 1 - Math.pow(distFromCenter / maxDist, 2));
-          const yOffset = Math.sin(x * layer.freq + phase * layer.speed)
-            * Math.cos(x * 0.005 - phase)
-            * currentAmplitude
-            * layer.ampMult
-            * envelope;
-          if (x === 0) {
-            ctx.moveTo(x, centerY + yOffset);
-          } else {
-            ctx.lineTo(x, centerY + yOffset);
-          }
-        }
-        if (layer.halo) {
-          ctx.strokeStyle = `rgba(${rgb}, ${isDark ? 0.18 : 0.08})`;
-          ctx.lineWidth = layer.lineWidth + 6;
-          ctx.stroke();
-        }
-        ctx.strokeStyle = `rgba(${rgb}, ${layer.alpha})`;
-        ctx.lineWidth = layer.lineWidth;
-        ctx.stroke();
-      }
-
-      // Equalizer vertical bars framing the central emblem (batched into 2 opacity tiers)
-      const halfBand = Math.min(320, width * 0.44);
-      const barSpacing = 9;
-      const baseBarAlpha = isCall ? 0.34 : 0.12;
-      const tiers = [
-        { minEnv: 0.48, maxEnv: 1.01, alpha: baseBarAlpha * 0.9 },
-        { minEnv: 0.05, maxEnv: 0.48, alpha: baseBarAlpha * 0.42 }
-      ];
-
-      ctx.lineWidth = 1.5;
-      for (const tier of tiers) {
-        ctx.beginPath();
-        for (let x = centerX - halfBand; x <= centerX + halfBand; x += barSpacing) {
-          const distFromCenter = Math.abs(x - centerX);
-          if (distFromCenter < 74) continue;
-          const envelope = Math.max(0, 1 - (distFromCenter / halfBand));
-          if (envelope < tier.minEnv || envelope >= tier.maxEnv) continue;
-          const barHeight = Math.abs(Math.sin(x * 0.04 + phase * 1.5)) * currentAmplitude * 0.85 * envelope;
-          ctx.moveTo(x, centerY - barHeight);
-          ctx.lineTo(x, centerY + barHeight);
-        }
-        ctx.strokeStyle = `rgba(${rgb}, ${tier.alpha})`;
-        ctx.stroke();
-      }
-
-      if (!prefersReducedMotion) {
-        rafId = window.requestAnimationFrame(drawFrame);
-      }
+      drawStaticLine();
     }
 
-    drawFrame();
-
     return () => {
-      window.clearInterval(burstTimer);
+      if (pulseTimer) window.clearInterval(pulseTimer);
       if (rafId) window.cancelAnimationFrame(rafId);
       if (resizeObserver) {
         resizeObserver.disconnect();
@@ -233,7 +174,7 @@ export default function VoiceWaveCanvas({
         logoRef.current.style.transform = '';
       }
     };
-  }, [logoRef]);
+  }, [active, darkMode, logoRef]);
 
   return (
     <canvas

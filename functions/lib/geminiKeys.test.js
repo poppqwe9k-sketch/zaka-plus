@@ -75,9 +75,14 @@ test('skips keys in 429 cooldown and automatically fails over to next healthy ke
   assert.equal(nextOrder.includes('test-key-2'), true);
 });
 
-test('sanitizes accidental Google API keys from error messages', () => {
-  const sanitized = sanitizeSecretFromErrorMessage('Key AIzaSyDummyKeyValue1234567890123456 is invalid');
-  assert.equal(sanitized, 'Key [REDACTED_KEY] is invalid');
+test('sanitizes accidental Google API keys, Bearer tokens, and internal GEMINI env names from error messages', () => {
+  const sanitized = sanitizeSecretFromErrorMessage(
+    'Key AIzaSyDummyKeyValue1234567890123456 with Bearer eyJhbGciOiJIUzI1NiJ9.payload failed on GEMINI_KEY_12 and GEMINI_KEYS'
+  );
+  assert.equal(
+    sanitized,
+    'Key [REDACTED_KEY] with Bearer [REDACTED_TOKEN] failed on [REDACTED_ENV] and [REDACTED_ENV]'
+  );
 });
 
 test('reads GEMINI_KEYS comma-separated list alongside GEMINI_KEY_1..13 and GEMINI_API_KEY', () => {

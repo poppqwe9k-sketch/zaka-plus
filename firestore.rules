@@ -34,6 +34,10 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == uid;
     }
 
+    function isNotBanned(userData) {
+      return !('banned' in userData) || userData.banned != true;
+    }
+
     function isValidUserProfile(data) {
       return data.keys().hasAll([
           'uid',
@@ -63,7 +67,8 @@ service cloud.firestore {
           'visitsCount',
           'createdAt',
           'updatedAt',
-          'lastActiveAt'
+          'lastActiveAt',
+          'banned'
         ])
         && isValidId(data.uid)
         && data.email is string && data.email.size() >= 3 && data.email.size() <= 254
@@ -77,7 +82,8 @@ service cloud.firestore {
         && data.visitsCount is int && data.visitsCount >= 0 && data.visitsCount <= 10000000
         && data.createdAt is timestamp
         && data.updatedAt is timestamp
-        && data.lastActiveAt is timestamp;
+        && data.lastActiveAt is timestamp
+        && (!('banned' in data) || data.banned is bool);
     }
 
     function isValidUserChat(data, uid) {
@@ -166,6 +172,7 @@ service cloud.firestore {
         && incoming().createdAt == request.time
         && incoming().updatedAt == request.time
         && incoming().lastActiveAt == request.time
+        && (!('banned' in incoming()) || incoming().banned == false)
         && (
           isAdmin() || (
             isOwner(uid)
@@ -188,9 +195,17 @@ service cloud.firestore {
           (isAdmin()
             && incoming().diff(existing()).affectedKeys().hasOnly(['plan', 'dailyLimit', 'remainingCredits', 'updatedAt'])
           ) ||
+          (isAdmin()
+            && !isOwner(uid)
+            && existing().email.lower() != 'poppqwe9k@gmail.com'
+            && incoming().diff(existing()).affectedKeys().hasOnly(['banned', 'updatedAt'])
+            && incoming().banned is bool
+          ) ||
           (isOwner(uid)
+            && isNotBanned(existing())
             && incoming().plan == existing().plan
             && incoming().dailyLimit == existing().dailyLimit
+            && (!('banned' in incoming()) || (('banned' in existing()) ? incoming().banned == existing().banned : incoming().banned == false))
             && (
               // Action 1: Consume 1 credit after real AI response
               (incoming().diff(existing()).affectedKeys().hasOnly(['remainingCredits', 'totalUsed', 'updatedAt', 'lastActiveAt'])
@@ -223,11 +238,13 @@ service cloud.firestore {
         allow get: if isValidId(uid)
           && isValidId(chatId)
           && isOwner(uid)
-          && get(/databases/$(database)/documents/users/$(uid)).data.uid == request.auth.uid;
+          && get(/databases/$(database)/documents/users/$(uid)).data.uid == request.auth.uid
+          && isNotBanned(get(/databases/$(database)/documents/users/$(uid)).data);
 
         allow list: if isValidId(uid)
           && isOwner(uid)
-          && existing().ownerUid == request.auth.uid;
+          && existing().ownerUid == request.auth.uid
+          && isNotBanned(get(/databases/$(database)/documents/users/$(uid)).data);
 
         allow create: if isValidId(uid)
           && isValidId(chatId)
@@ -236,7 +253,8 @@ service cloud.firestore {
           && incoming().id == chatId
           && incoming().createdAt == request.time
           && incoming().updatedAt == request.time
-          && get(/databases/$(database)/documents/users/$(uid)).data.uid == request.auth.uid;
+          && get(/databases/$(database)/documents/users/$(uid)).data.uid == request.auth.uid
+          && isNotBanned(get(/databases/$(database)/documents/users/$(uid)).data);
 
         allow update: if isValidId(uid)
           && isValidId(chatId)
@@ -248,12 +266,14 @@ service cloud.firestore {
           && incoming().createdAtMs == existing().createdAtMs
           && incoming().updatedAt == request.time
           && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'messages', 'updatedAtMs', 'updatedAt'])
-          && get(/databases/$(database)/documents/users/$(uid)).data.uid == request.auth.uid;
+          && get(/databases/$(database)/documents/users/$(uid)).data.uid == request.auth.uid
+          && isNotBanned(get(/databases/$(database)/documents/users/$(uid)).data);
 
         allow delete: if isValidId(uid)
           && isValidId(chatId)
           && isOwner(uid)
-          && get(/databases/$(database)/documents/users/$(uid)).data.uid == request.auth.uid;
+          && get(/databases/$(database)/documents/users/$(uid)).data.uid == request.auth.uid
+          && isNotBanned(get(/databases/$(database)/documents/users/$(uid)).data);
       }
     }
 

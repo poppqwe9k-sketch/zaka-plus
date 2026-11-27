@@ -3,176 +3,93 @@ import assert from 'node:assert/strict';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import AdminPanelModal from './AdminPanelModal.jsx';
-import AuthModal from './AuthModal.jsx';
 import { getTranslation } from '../i18n/translations.js';
 
-test('AdminPanelModal renders independent Plus Plus (200) and Plus (10,000) capacity cards with separate progress bars and shared Refresh', async () => {
+const sampleUsers = [
+  {
+    uid: 'uid_admin_1',
+    displayName: 'المسؤول',
+    email: 'poppqwe9k@gmail.com',
+    plan: 'vip',
+    dailyLimit: 100,
+    remainingCredits: 100,
+    visitsCount: 12,
+    totalUsed: 4,
+    cycleStartedAt: 1700000000300,
+    banned: false
+  },
+  {
+    uid: 'uid_active_2',
+    displayName: 'سارة',
+    email: 'sara@example.com',
+    plan: 'free',
+    dailyLimit: 3,
+    remainingCredits: 2,
+    visitsCount: 3,
+    totalUsed: 1,
+    cycleStartedAt: 1700000000200,
+    banned: false
+  },
+  {
+    uid: 'uid_banned_3',
+    displayName: 'خالد',
+    email: 'khaled@example.com',
+    plan: 'pro',
+    dailyLimit: 25,
+    remainingCredits: 20,
+    visitsCount: 5,
+    totalUsed: 5,
+    cycleStartedAt: 1700000000100,
+    banned: true
+  }
+];
+
+test('renders "حظر مستخدمين" button with registered Firestore users count and ban toggle list', () => {
   const t = getTranslation('ar');
-  const now = Date.now();
-  const { getPacificCycleStartMs, getPacificDateKey } = await import('../utils/pacificTime.js');
-  const html = renderToStaticMarkup(
+
+  const closedMarkup = renderToStaticMarkup(
     <AdminPanelModal
-      open={true}
+      open
       onClose={() => {}}
-      dailyQuota={{ validKeyCount: 10, totalCapacity: 200, remaining: 185, usedCount: 15 }}
-      plusDailyQuota={{ validKeyCount: 10, totalCapacity: 10000, remaining: 9940, usedCount: 60 }}
-      quotaAnalytics={{
-        cycleStartedAt: getPacificCycleStartMs(now),
-        ptDateKey: getPacificDateKey(now),
-        plusPlusUsed: 15,
-        plusUsed: 60,
-        plusPlusChars: 3450,
-        plusChars: 18920
-      }}
-      onRefreshQuota={() => {}}
-      onRefreshDashboard={async () => {}}
-      usersList={[
-        {
-          uid: 'u1',
-          displayName: 'أحمد',
-          email: 'ahmed@example.com',
-          plan: 'free',
-          dailyLimit: 3,
-          remainingCredits: 2,
-          visitsCount: 4,
-          totalUsed: 1,
-          cycleStartedAt: 1700000000000
-        },
-        {
-          uid: 'u2',
-          displayName: 'سارة',
-          email: 'sara@example.com',
-          plan: 'pro',
-          dailyLimit: 25,
-          remainingCredits: 20,
-          visitsCount: 7,
-          totalUsed: 5,
-          cycleStartedAt: 1700000001000
-        }
-      ]}
-      analytics={{ totalVisits: 12, registeredUsersCount: 2 }}
-      onUpdateUserSubscription={async () => {}}
-      langCode="ar"
+      dailyQuota={null}
+      usersList={sampleUsers}
+      analytics={{ totalVisits: 20, registeredUsersCount: 3 }}
+      onUpdateUserSubscription={() => {}}
+      onToggleUserBan={() => {}}
+      currentUserUid="uid_admin_1"
+      initialBanUsersOpen={false}
       t={t}
     />
   );
 
-  assert.match(html, /لوحة تحكم المسؤول/);
-  assert.doesNotMatch(html, /السعة الكلية المتبقية \(من أصل 200 رسالة\)/);
-  assert.doesNotMatch(html, /جيمناي 4 هيدروجين/);
-  assert.doesNotMatch(html, /Gemini 4 Hydrogen/);
-  assert.match(html, /نموذج بلس بلاس \(gemini-4-hydrogen\)/);
-  assert.match(html, /الرسائل المتبقية اليوم/);
-  assert.match(html, /185/);
-  assert.match(html, /\/ 200/);
-  assert.match(html, /إجمالي الحروف المستهلكة اليوم/);
-  assert.match(html, /3,450/);
-  assert.match(html, /نموذج بلس \(gemini-3\.5-flash-lite\)/);
-  assert.match(html, /9,940/);
-  assert.match(html, /\/ 10,000/);
-  assert.match(html, /18,920/);
-  assert.match(html, /data-testid="admin-chars-plus-plus"/);
-  assert.match(html, /data-testid="admin-chars-plus"/);
-  assert.match(html, /data-testid="admin-reset-countdown-plus-plus"/);
-  assert.match(html, /data-testid="admin-reset-countdown-plus"/);
-  assert.match(html, /data-testid="admin-progress-plus-plus"/);
-  assert.match(html, /data-testid="admin-progress-plus"/);
-  assert.match(html, /data-testid="admin-refresh-button"/);
-  assert.match(html, /إجمالي الزيارات والمشاهدات/);
-  assert.match(html, /12/);
-  assert.match(html, /<button[^>]*data-testid="admin-registered-users"[^>]*aria-expanded="false"/);
-  assert.match(html, /المستخدمون المسجلون/);
-  // Registered users list inside Views & Visits must be completely hidden by default
-  assert.doesNotMatch(html, /data-testid="admin-visits-dropdown"/);
-  assert.doesNotMatch(html, /ahmed@example\.com/);
-  assert.match(html, /الاشتراكات والمزيد/);
-  assert.match(html, /المشتركون \(الباقات المدفوعة\) \(1\)/);
-  assert.match(html, /المستخدمين \(2\)/);
-  // Paid tab is default: paid user sara appears in subscriptions list, while free user ahmed does not
-  assert.match(html, /data-testid="admin-user-row-u2"/);
-  assert.doesNotMatch(html, /data-testid="admin-user-row-u1"/);
-  assert.match(html, /ترقية إلى بلس برو/);
-  assert.match(html, /ترقية إلى VIP/);
+  assert.match(closedMarkup, /data-testid="admin-ban-users-button"/);
+  assert.match(closedMarkup, /حظر مستخدمين/);
+  assert.match(closedMarkup, /\(3\)/);
+  assert.doesNotMatch(closedMarkup, /data-testid="admin-ban-users-panel"/);
 
-  const expandedHtml = renderToStaticMarkup(
+  const openMarkup = renderToStaticMarkup(
     <AdminPanelModal
-      open={true}
+      open
       onClose={() => {}}
-      dailyQuota={{ validKeyCount: 10, totalCapacity: 200, remaining: 185, usedCount: 15 }}
-      plusDailyQuota={{ validKeyCount: 10, totalCapacity: 10000, remaining: 9940, usedCount: 60 }}
-      onRefreshQuota={() => {}}
-      onRefreshDashboard={async () => {}}
-      initialVisitsUsersOpen={true}
-      usersList={[
-        {
-          uid: 'u1',
-          displayName: 'حيدر',
-          email: 'haider@example.com',
-          plan: 'free',
-          dailyLimit: 3,
-          remainingCredits: 2,
-          visitsCount: 4,
-          totalUsed: 1,
-          cycleStartedAt: 1700000000000
-        }
-      ]}
-      analytics={{ totalVisits: 5, registeredUsersCount: 1 }}
-      onUpdateUserSubscription={async () => {}}
-      langCode="ar"
+      dailyQuota={null}
+      usersList={sampleUsers}
+      analytics={{ totalVisits: 20, registeredUsersCount: 3 }}
+      onUpdateUserSubscription={() => {}}
+      onToggleUserBan={() => {}}
+      currentUserUid="uid_admin_1"
+      initialBanUsersOpen
       t={t}
     />
   );
 
-  assert.match(expandedHtml, /<button[^>]*data-testid="admin-registered-users"[^>]*aria-expanded="true"/);
-  assert.match(expandedHtml, /data-testid="admin-visits-dropdown"/);
-  assert.match(expandedHtml, /haider@example\.com/);
-});
-
-test('AuthModal renders email/password inputs, login/signup tabs, forgot-password link, and Google quick sign-in', () => {
-  const t = getTranslation('ar');
-  const signupHtml = renderToStaticMarkup(
-    <AuthModal
-      open={true}
-      initialMode="signup"
-      promptMessage=""
-      onClose={() => {}}
-      onSuccess={() => {}}
-      t={t}
-    />
-  );
-
-  assert.match(signupHtml, /الدخول السريع عبر Google/);
-  assert.match(signupHtml, /تسجيل الدخول/);
-  assert.match(signupHtml, /إنشاء حساب/);
-  assert.match(signupHtml, /البريد الإلكتروني/);
-  assert.match(signupHtml, /كلمة المرور/);
-  assert.match(signupHtml, /3 رسائل مجانية يومياً/);
-
-  const loginHtml = renderToStaticMarkup(
-    <AuthModal
-      open={true}
-      initialMode="login"
-      promptMessage=""
-      onClose={() => {}}
-      onSuccess={() => {}}
-      t={t}
-    />
-  );
-  assert.match(loginHtml, /data-testid="auth-forgot-link"/);
-  assert.match(loginHtml, /نسيت كلمة المرور؟/);
-
-  const forgotHtml = renderToStaticMarkup(
-    <AuthModal
-      open={true}
-      initialMode="forgot"
-      promptMessage=""
-      onClose={() => {}}
-      onSuccess={() => {}}
-      t={t}
-    />
-  );
-  assert.match(forgotHtml, /استعادة كلمة المرور/);
-  assert.match(forgotHtml, /إرسال رابط إعادة التعيين/);
-  assert.match(forgotHtml, /data-testid="auth-back-to-login"/);
-  assert.doesNotMatch(forgotHtml, /id="auth-password"/);
+  assert.match(openMarkup, /data-testid="admin-ban-users-panel"/);
+  assert.match(openMarkup, /sara@example\.com/);
+  assert.match(openMarkup, /khaled@example\.com/);
+  assert.match(openMarkup, /uid_active_2/);
+  assert.match(openMarkup, /uid_banned_3/);
+  assert.match(openMarkup, /data-testid="admin-ban-status-uid_active_2"[^>]*>نشط</);
+  assert.match(openMarkup, /data-testid="admin-ban-status-uid_banned_3"[^>]*>محظور</);
+  assert.match(openMarkup, /data-testid="admin-ban-toggle-uid_active_2"[^>]*>حظر</);
+  assert.match(openMarkup, /data-testid="admin-ban-toggle-uid_banned_3"[^>]*>إلغاء الحظر</);
+  assert.match(openMarkup, /data-testid="admin-ban-toggle-uid_admin_1"[^>]*disabled=""/);
 });

@@ -132,6 +132,11 @@ export async function syncUserProfileOnSignIn(firebaseUser, options = {}) {
   }
 
   const existing = snap.data();
+  if (existing?.banned === true) {
+    return existing;
+  }
+
+  let updatedSnapshot = { ...existing };
   const dailyLimit = clampDailyLimit(existing.dailyLimit);
   const currentRemaining = clampCredits(existing.remainingCredits, dailyLimit);
 
@@ -145,6 +150,12 @@ export async function syncUserProfileOnSignIn(firebaseUser, options = {}) {
         updatedAt: serverTimestamp(),
         lastActiveAt: serverTimestamp()
       });
+      updatedSnapshot = {
+        ...updatedSnapshot,
+        remainingCredits: renewedCredits,
+        cycleStartedAt: now,
+        lastResetDate: todayKey
+      };
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, path);
     }
@@ -163,6 +174,11 @@ export async function syncUserProfileOnSignIn(firebaseUser, options = {}) {
         updatedAt: serverTimestamp(),
         lastActiveAt: serverTimestamp()
       });
+      updatedSnapshot = {
+        ...updatedSnapshot,
+        visitsCount: Math.max(0, Number(updatedSnapshot.visitsCount) || 0) + 1,
+        displayName: resolvedName
+      };
       if (typeof sessionStorage !== 'undefined') {
         sessionStorage.setItem(sessionKey, '1');
       }
@@ -178,12 +194,16 @@ export async function syncUserProfileOnSignIn(firebaseUser, options = {}) {
         updatedAt: serverTimestamp(),
         lastActiveAt: serverTimestamp()
       });
+      updatedSnapshot = {
+        ...updatedSnapshot,
+        displayName: resolvedName
+      };
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, path);
     }
   }
 
-  return existing;
+  return updatedSnapshot;
 }
 
 export function subscribeUserProfile(uid, onData, onError, onMissing) {
@@ -621,6 +641,21 @@ export async function adminUpdateUserSubscription(targetUid, { plan, dailyLimit,
     plan: normalizePlan(plan),
     dailyLimit: clampDailyLimit(dailyLimit),
     remainingCredits: clampCredits(remainingCredits, clampDailyLimit(dailyLimit)),
+    updatedAt: serverTimestamp()
+  };
+
+  try {
+    await updateDoc(doc(db, 'users', targetUid), payload);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
+  }
+}
+
+export async function adminUpdateUserBanStatus(targetUid, banned) {
+  if (!targetUid) throw new Error('Missing user ID');
+  const path = `users/${targetUid}`;
+  const payload = {
+    banned: Boolean(banned),
     updatedAt: serverTimestamp()
   };
 

@@ -70,6 +70,10 @@
           "type": "string",
           "format": "date-time",
           "description": "Server timestamp of the user's most recent visit or activity."
+        },
+        "banned": {
+          "type": "boolean",
+          "description": "Whether the user has been banned by an administrator."
         }
       },
       "required": [

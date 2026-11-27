@@ -334,13 +334,17 @@ export function createGeminiClient(apiKey) {
 
 export function sanitizeSecretFromErrorMessage(message) {
   if (typeof message !== 'string') return '';
-  return message.replace(/AIza[0-9A-Za-z_-]{20,}/g, '[REDACTED_KEY]');
+  return message
+    .replace(/AIza[0-9A-Za-z_-]{20,}/g, '[REDACTED_KEY]')
+    .replace(/\bsk-[A-Za-z0-9_-]{16,}\b/g, '[REDACTED_KEY]')
+    .replace(/\bBearer\s+[A-Za-z0-9._-]{16,}/gi, 'Bearer [REDACTED_TOKEN]')
+    .replace(/\bGEMINI_(?:API_)?KEYS?(?:_\d+|_[A-Z0-9_]+)?\b/g, '[REDACTED_ENV]');
 }
 
 export async function runWithRotatedGeminiKeys(env, taskFn, { model = '', now = Date.now() } = {}) {
   const allKeys = getGeminiApiKeys(env);
   if (allKeys.length === 0) {
-    throw new Error('لم يتم العثور على أي مفتاح GEMINI_KEY أو GEMINI_KEY_1..19 أو GEMINI_KEYS على الخادم.');
+    throw new Error('خدمة الذكاء الاصطناعي غير مهيأة حالياً على الخادم.');
   }
 
   const rotatedKeys = rotateGeminiKeys(env, model, now);

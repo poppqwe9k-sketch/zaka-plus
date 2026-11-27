@@ -12,9 +12,11 @@ import {
   computeDualModelCapacitySummary,
   filterAndSortUsers,
   filterUsersDirectory,
+  isAdminAccountRecord,
   isAdminEmailUnverified,
   isAdminUser,
   isPaidPlanUser,
+  isUserBanned,
   isUserProfileCycleExpired,
   mapFirebaseAuthError,
   shouldFallbackToRedirectSignIn,
@@ -56,6 +58,7 @@ test('initializes new account profile with 3 daily free messages and free plan',
   assert.equal(profile.visitsCount, 1);
   assert.equal(profile.cycleStartedAt, now);
   assert.equal(profile.lastResetDate, '2026-11-23');
+  assert.equal(profile.banned, false);
 });
 
 test('computes remaining global capacity out of 200 messages for Admin Panel', () => {
@@ -233,4 +236,23 @@ test('maps Firebase Auth error codes to localized readable messages with provide
   assert.match(mapFirebaseAuthError({ code: 'auth/configuration-not-found' }), /Authentication/);
   assert.match(mapFirebaseAuthError({ code: 'auth/user-disabled' }), /تعطيل/);
   assert.match(mapFirebaseAuthError({ code: 'auth/account-exists-with-different-credential' }), /طريقة دخول أخرى/);
+});
+
+test('detects banned user state safely and protects admin record from self-ban', () => {
+  assert.equal(isUserBanned(null), false);
+  assert.equal(isUserBanned({}), false);
+  assert.equal(isUserBanned({ banned: false }), false);
+  assert.equal(isUserBanned({ banned: 'true' }), false);
+  assert.equal(isUserBanned({ banned: true }), true);
+
+  assert.equal(isAdminAccountRecord({ uid: 'u1', email: 'poppqwe9k@gmail.com' }, 'u2'), true);
+  assert.equal(isAdminAccountRecord({ uid: 'u2', email: 'other@example.com' }, 'u2'), true);
+  assert.equal(isAdminAccountRecord({ uid: 'u3', email: 'user@example.com' }, 'u2'), false);
+
+  const users = [
+    { uid: 'uid_alpha_99', displayName: 'سارة', email: 'sara@mail.com', plan: 'free', cycleStartedAt: 100 },
+    { uid: 'uid_beta_42', displayName: 'أحمد', email: 'ahmed@mail.com', plan: 'pro', cycleStartedAt: 200 }
+  ];
+  const byUid = filterAndSortUsers(users, 'alpha_99');
+  assert.deepEqual(byUid.map((u) => u.uid), ['uid_alpha_99']);
 });

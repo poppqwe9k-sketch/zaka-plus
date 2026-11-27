@@ -20,6 +20,7 @@ import {
 } from './shared/modelTiers.js';
 import AuthModal from './components/AuthModal.jsx';
 import AdminPanelModal from './components/AdminPanelModal.jsx';
+import HydrogenQuotaBar from './components/HydrogenQuotaBar.jsx';
 import VoiceCallModal from './components/VoiceCallModal.jsx';
 import VoiceWaveCanvas from './components/VoiceWaveCanvas.jsx';
 import {
@@ -75,15 +76,24 @@ import {
   shouldUseFallbackLiteModel
 } from './utils/credits.js';
 import {
+  DAILY_HYDROGEN_LIMIT,
+  exhaustHydrogenQuotaToday,
+  getHydrogenUsedToday,
+  incrementHydrogenUsedToday,
+  reconcileCreditsWithHydrogenQuota
+} from './utils/hydrogenQuota.js';
+import {
   clampCredits,
   clampDailyLimit,
   isAdminEmailUnverified,
   isAdminUser,
+  isUserBanned,
   mapFirebaseAuthError,
   normalizePlan,
   sanitizeDisplayName
 } from './utils/authAdmin.js';
 import {
+  adminUpdateUserBanStatus,
   adminUpdateUserSubscription,
   clearUserChatsInFirestore,
   consumeUserCreditInFirestore,
@@ -371,8 +381,12 @@ export default function App() {
   const [renamingChatId, setRenamingChatId] = useState(null);
   const [renamingTitle, setRenamingTitle] = useState('');
   const [isListening, setIsListening] = useState(false);
-  const [credits, setCredits] = useState(() => loadCreditsState());
+  const [credits, setCredits] = useState(() =>
+    reconcileCreditsWithHydrogenQuota(loadCreditsState())
+  );
   const [creditsExhaustedHighlight, setCreditsExhaustedHighlight] = useState(false);
+  const [autoSwitchedToLite, setAutoSwitchedToLite] = useState(false);
+  const [quotaNoticeDismissed, setQuotaNoticeDismissed] = useState(false);
   const [globalCapacityExhausted, setGlobalCapacityExhausted] = useState(false);
   const [dailyQuota, setDailyQuota] = useState(() => {
     const saved = loadDailyQuotaState(undefined, QUOTA_STORAGE_KEY);
@@ -495,6 +509,8 @@ export default function App() {
   useEffect(() => {
     if (credits.remaining <= 0 && activeModelTier !== FAST_MODEL_TIER) {
       setSettings((prev) => normalizeSettings({ ...prev, selectedModel: FAST_MODEL_TIER }));
+      setAutoSwitchedToLite(true);
+      setQuotaNoticeDismissed(false);
     }
   }, [credits.remaining, activeModelTier]);
 
@@ -513,9 +529,15 @@ export default function App() {
 
   const userIsAdmin = useMemo(() => isAdminUser(currentUser), [currentUser]);
   const userIsUnverifiedAdmin = useMemo(() => isAdminEmailUnverified(currentUser), [currentUser]);
+  const userIsBanned = useMemo(
+    () => Boolean(currentUser) && !userIsAdmin && isUserBanned(userProfile),
+    [currentUser, userIsAdmin, userProfile]
+  );
+  const userIsBannedRef = useRef(userIsBanned);
+  userIsBannedRef.current = userIsBanned;
 
   const syncChatToCloud = useCallback((uid, chatObj) => {
-    if (!uid || !chatObj) return;
+    if (!uid || !chatObj || userIsBannedRef.current) return;
     const isKnownRemote = knownRemoteChatIdsRef.current.has(chatObj.id);
     upsertUserChatInFirestore(uid, chatObj, { isKnownRemote })
       .then(() => {
@@ -548,7 +570,6 @@ export default function App() {
 
   useEffect(() => {
     let unsubProfile = null;
-    let unsubChats = null;
     let cancelled = false;
     let previousUid = null;
 
@@ -556,10 +577,6 @@ export default function App() {
       if (unsubProfile) {
         unsubProfile();
         unsubProfile = null;
-      }
-      if (unsubChats) {
-        unsubChats();
-        unsubChats = null;
       }
 
       if (cancelled) return;
@@ -603,7 +620,11 @@ export default function App() {
       }
 
       const cachedKey = getUserCreditsStorageKey(firebaseUser.uid);
-      setCredits(loadCreditsState(getLocalDateKey(), Date.now(), DAILY_FREE_CREDITS, cachedKey));
+      setCredits(
+        reconcileCreditsWithHydrogenQuota(
+          loadCreditsState(getLocalDateKey(), Date.now(), DAILY_FREE_CREDITS, cachedKey)
+        )
+      );
 
       const userHydrated = await loadOfflineState(nextScopeKey);
       if (cancelled || activeScopeRef.current !== nextScopeKey) return;
@@ -615,31 +636,41 @@ export default function App() {
         ? pendingDisplayNameRef.current.displayName
         : '';
 
+      let syncedProfile = null;
       try {
-        await syncUserProfileOnSignIn(firebaseUser, { preferredDisplayName: pendingName });
+        syncedProfile = await syncUserProfileOnSignIn(firebaseUser, { preferredDisplayName: pendingName });
       } catch (err) {
         console.error('Failed syncing user profile:', err);
       }
 
       if (cancelled || activeScopeRef.current !== nextScopeKey) return;
+      if (syncedProfile) {
+        setUserProfile(syncedProfile);
+      }
 
       unsubProfile = subscribeUserProfile(
         firebaseUser.uid,
         (profileData) => {
           if (cancelled || activeScopeRef.current !== nextScopeKey) return;
           setUserProfile(profileData);
+          if (isUserBanned(profileData)) {
+            return;
+          }
           const nowMs = Date.now();
           const todayKey = getLocalDateKey(new Date(nowMs));
           const userDailyLimit = clampDailyLimit(profileData.dailyLimit);
-          const synced = normalizeCreditsState(
-            {
-              remaining: clampCredits(profileData.remainingCredits, userDailyLimit),
-              cycleStartedAt: Number(profileData.cycleStartedAt) || nowMs,
-              lastResetDate: profileData.lastResetDate || todayKey,
-              totalUsed: Number(profileData.totalUsed) || 0
-            },
-            todayKey,
-            nowMs,
+          const synced = reconcileCreditsWithHydrogenQuota(
+            normalizeCreditsState(
+              {
+                remaining: clampCredits(profileData.remainingCredits, userDailyLimit),
+                cycleStartedAt: Number(profileData.cycleStartedAt) || nowMs,
+                lastResetDate: profileData.lastResetDate || todayKey,
+                totalUsed: Number(profileData.totalUsed) || 0
+              },
+              todayKey,
+              nowMs,
+              userDailyLimit
+            ),
             userDailyLimit
           );
           setCredits(synced);
@@ -655,34 +686,15 @@ export default function App() {
           const healName = pendingDisplayNameRef.current?.uid === firebaseUser.uid
             ? pendingDisplayNameRef.current.displayName
             : '';
-          syncUserProfileOnSignIn(firebaseUser, { preferredDisplayName: healName }).catch((healErr) => {
-            console.error('Failed healing missing user profile:', healErr);
-          });
-        }
-      );
-
-      unsubChats = subscribeUserChats(
-        firebaseUser.uid,
-        (remoteChats) => {
-          if (cancelled || activeScopeRef.current !== nextScopeKey) return;
-          for (const chat of remoteChats) {
-            knownRemoteChatIdsRef.current.add(chat.id);
-          }
-          const filteredRemote = remoteChats.filter(
-            (chat) => !deletedChatIdsRef.current.has(chat.id)
-          );
-          setChats((prev) => {
-            const merged = mergeStoredChats(filteredRemote, prev);
-            setActiveChatId((currentActive) => (
-              currentActive && merged.some((c) => c.id === currentActive)
-                ? currentActive
-                : (merged[0]?.id || null)
-            ));
-            return merged;
-          });
-        },
-        (chatsErr) => {
-          console.error('User chats subscription error:', chatsErr);
+          syncUserProfileOnSignIn(firebaseUser, { preferredDisplayName: healName })
+            .then((healed) => {
+              if (healed && !cancelled && activeScopeRef.current === nextScopeKey) {
+                setUserProfile(healed);
+              }
+            })
+            .catch((healErr) => {
+              console.error('Failed healing missing user profile:', healErr);
+            });
         }
       );
     });
@@ -691,9 +703,60 @@ export default function App() {
       cancelled = true;
       unsubAuth();
       if (unsubProfile) unsubProfile();
-      if (unsubChats) unsubChats();
     };
   }, []);
+
+  useEffect(() => {
+    const uid = currentUser?.uid || '';
+    if (!authReady || !uid || !userProfile || userIsBanned) {
+      return undefined;
+    }
+
+    const expectedScopeKey = getUserChatScopeKey(uid);
+    let cancelled = false;
+
+    const unsubChats = subscribeUserChats(
+      uid,
+      (remoteChats) => {
+        if (cancelled || activeScopeRef.current !== expectedScopeKey) return;
+        for (const chat of remoteChats) {
+          knownRemoteChatIdsRef.current.add(chat.id);
+        }
+        const filteredRemote = remoteChats.filter(
+          (chat) => !deletedChatIdsRef.current.has(chat.id)
+        );
+        setChats((prev) => {
+          const merged = mergeStoredChats(filteredRemote, prev);
+          setActiveChatId((currentActive) => (
+            currentActive && merged.some((c) => c.id === currentActive)
+              ? currentActive
+              : (merged[0]?.id || null)
+          ));
+          return merged;
+        });
+      },
+      (chatsErr) => {
+        console.error('User chats subscription error:', chatsErr);
+      }
+    );
+
+    return () => {
+      cancelled = true;
+      unsubChats();
+    };
+  }, [authReady, currentUser?.uid, userProfile, userIsBanned]);
+
+  useEffect(() => {
+    if (!userIsBanned) return;
+    setSidebarOpen(false);
+    setSettingsOpen(false);
+    setAdminModalOpen(false);
+    setAuthModalOpen(false);
+    setVoiceCallOpen(false);
+    setModelMenuOpen(false);
+    setAttachMenuOpen(false);
+    setIsSending(false);
+  }, [userIsBanned]);
 
   useEffect(() => {
     if (!authReady || !userIsAdmin) {
@@ -1137,6 +1200,7 @@ export default function App() {
   }
 
   function handleDeleteChat(chatId) {
+    if (userIsBanned) return;
     if (renamingChatId === chatId) {
       setRenamingChatId(null);
       setRenamingTitle('');
@@ -1158,6 +1222,7 @@ export default function App() {
   }
 
   async function handleClearHistory() {
+    if (userIsBanned) return;
     const existingIds = chatsRef.current.map((c) => c.id);
     for (const id of existingIds) {
       deletedChatIdsRef.current.add(id);
@@ -1246,11 +1311,17 @@ export default function App() {
     messageAttachments = [],
     extraSystemInstruction = ''
   }) {
+    if (userIsBannedRef.current) {
+      return { error: t.bannedScreenTitle };
+    }
     const trimmed = typeof promptText === 'string' ? promptText.trim() : '';
     const nowMs = Date.now();
     const todayKey = getLocalDateKey(new Date(nowMs));
     const userLimit = clampDailyLimit(userProfile?.dailyLimit || credits.dailyLimit);
-    const currentCredits = normalizeCreditsState(credits, todayKey, nowMs, userLimit);
+    const currentCredits = reconcileCreditsWithHydrogenQuota(
+      normalizeCreditsState(credits, todayKey, nowMs, userLimit),
+      userLimit
+    );
     if (
       currentCredits.remaining !== credits.remaining
       || currentCredits.lastResetDate !== credits.lastResetDate
@@ -1329,6 +1400,12 @@ export default function App() {
         return { replyText: '' };
       }
 
+      if (useFallbackMode && activeModelTier !== FAST_MODEL_TIER) {
+        updateSetting('selectedModel', FAST_MODEL_TIER);
+        setAutoSwitchedToLite(true);
+        setQuotaNoticeDismissed(false);
+      }
+
       const systemText = extraSystemInstruction || settings.systemInstruction.trim();
       const response = await fetch('/api/chat', {
         method: 'POST',
@@ -1337,9 +1414,11 @@ export default function App() {
           messages: historyPayload,
           attachments: outgoingAttachments.length ? outgoingAttachments : undefined,
           systemInstruction: systemText || undefined,
-          selectedModel: activeModelTier,
+          selectedModel: useFallbackMode ? FAST_MODEL_TIER : activeModelTier,
           model: useFallbackMode ? GEMINI_FALLBACK_LITE_MODEL_ID : GEMINI_HYDROGEN_MODEL_ID,
           useFallbackOnly: useFallbackMode,
+          plusPlusUsedCount: getHydrogenUsedToday(),
+          hasUpgradedPlan: userLimit > DAILY_HYDROGEN_LIMIT,
           deepThinking: settings.deepThinking
         })
       });
@@ -1383,7 +1462,7 @@ export default function App() {
         throw new Error(data?.error || data?.message || t.genericError);
       }
 
-      const usedFallback = Boolean(data?.usedFallback);
+      const usedFallback = Boolean(data?.usedFallback || data?.fallbackToPlus);
       const primaryExhausted = Boolean(data?.primaryCapacityExhausted);
       const usedPlusPlus = data?.model === GEMINI_HYDROGEN_MODEL_ID
         || (!data?.model && data?.usedTier === SUPER_MODEL_TIER);
@@ -1457,24 +1536,47 @@ export default function App() {
       }
 
       if (shouldDeductCreditForReply({ usedFallback })) {
+        incrementHydrogenUsedToday();
         let remainingAfterSend = credits.remaining;
         setCredits((prev) => {
           const limit = clampDailyLimit(userProfile?.dailyLimit || prev.dailyLimit);
-          const next = consumeOneCredit(prev, getLocalDateKey(), Date.now(), limit);
+          const next = reconcileCreditsWithHydrogenQuota(
+            consumeOneCredit(prev, getLocalDateKey(), Date.now(), limit),
+            limit
+          );
           remainingAfterSend = next.remaining;
           saveCreditsState(next, getUserCreditsStorageKey(currentUser?.uid || ''));
           return next;
         });
         if (remainingAfterSend <= 0 && activeModelTier !== FAST_MODEL_TIER) {
           updateSetting('selectedModel', FAST_MODEL_TIER);
+          setAutoSwitchedToLite(true);
+          setQuotaNoticeDismissed(false);
         }
         if (currentUser?.uid && userProfile) {
           consumeUserCreditInFirestore(currentUser.uid, userProfile).catch((consumeErr) => {
             console.error('Failed syncing consumed message credit:', consumeErr);
           });
         }
-      } else if (usedFallback && activeModelTier !== FAST_MODEL_TIER) {
-        updateSetting('selectedModel', FAST_MODEL_TIER);
+      } else if (usedFallback) {
+        if (!useFallbackMode && userLimit <= DAILY_HYDROGEN_LIMIT) {
+          exhaustHydrogenQuotaToday();
+          setCredits((prev) => {
+            const limit = clampDailyLimit(userProfile?.dailyLimit || prev.dailyLimit);
+            const next = reconcileCreditsWithHydrogenQuota(
+              normalizeCreditsState(prev, getLocalDateKey(), Date.now(), limit),
+              limit,
+              0
+            );
+            saveCreditsState(next, getUserCreditsStorageKey(currentUser?.uid || ''));
+            return next;
+          });
+        }
+        if (activeModelTier !== FAST_MODEL_TIER) {
+          updateSetting('selectedModel', FAST_MODEL_TIER);
+        }
+        setAutoSwitchedToLite(true);
+        setQuotaNoticeDismissed(false);
       }
 
       const safeSources = sanitizeClientSources(data?.sources);
@@ -1517,6 +1619,7 @@ export default function App() {
   }
 
   function handleOpenVoiceCall() {
+    if (userIsBanned) return;
     if (isListening) {
       stopVoiceDictation(true);
     }
@@ -1527,6 +1630,9 @@ export default function App() {
   }
 
   async function handleSendVoiceTurn(spokenText) {
+    if (userIsBannedRef.current) {
+      return { error: t.bannedScreenTitle };
+    }
     if (!currentUser) {
       return { error: t.authRequiredToSend };
     }
@@ -1539,6 +1645,7 @@ export default function App() {
 
   async function handleSubmit(event) {
     event.preventDefault();
+    if (userIsBanned) return;
     if (isListening) {
       stopVoiceDictation(true);
     }
@@ -1659,9 +1766,13 @@ export default function App() {
           }),
           { syncCloud: true }
         );
+        incrementHydrogenUsedToday();
         setCredits((prev) => {
           const limit = clampDailyLimit(userProfile?.dailyLimit || prev.dailyLimit);
-          const next = consumeOneCredit(prev, getLocalDateKey(), Date.now(), limit);
+          const next = reconcileCreditsWithHydrogenQuota(
+            consumeOneCredit(prev, getLocalDateKey(), Date.now(), limit),
+            limit
+          );
           saveCreditsState(next, getUserCreditsStorageKey(currentUser?.uid || ''));
           return next;
         });
@@ -1767,6 +1878,35 @@ export default function App() {
         imageErrorMessage: m.imageErrorMessage || t.imageLoadError
       }),
       { syncCloud: true }
+    );
+  }
+
+  if (userIsBanned) {
+    return (
+      <div
+        className={`chat-app chat-banned-screen ${settings.darkMode ? 'chat-dark' : ''}`}
+        dir={langMeta.dir}
+        data-testid="banned-lockout-screen"
+      >
+        <div
+          className="banned-card"
+          role="alertdialog"
+          aria-modal="true"
+          aria-labelledby="banned-screen-title"
+        >
+          <h1 id="banned-screen-title" className="banned-title">
+            {t.bannedScreenTitle}
+          </h1>
+          <button
+            type="button"
+            className="banned-logout-button"
+            data-testid="banned-logout-button"
+            onClick={handleSignOut}
+          >
+            {t.authLogoutButton}
+          </button>
+        </div>
+      </div>
     );
   }
 
@@ -2257,17 +2397,15 @@ export default function App() {
             </div>
           )}
 
-          {credits.remaining <= 0 && (
-            <div
-              className={`credits-exhausted-notice ${creditsExhaustedHighlight ? 'credits-exhausted-notice-highlight' : ''}`}
-              data-testid="credits-exhausted-notice"
-              role="status"
-            >
-              <strong>{t.creditsExhaustedTitle}</strong>
-              <span>{t.creditsExhaustedDevNote}</span>
-              <small>{t.creditsExhaustedDesc}</small>
-            </div>
-          )}
+          <HydrogenQuotaBar
+            selectedModel={activeModelOption.model}
+            remainingCount={credits.remaining}
+            dailyLimit={clampDailyLimit(userProfile?.dailyLimit || credits.dailyLimit)}
+            autoSwitchedToLite={autoSwitchedToLite}
+            noticeDismissed={quotaNoticeDismissed}
+            highlightNotice={creditsExhaustedHighlight}
+            onDismissNotice={() => setQuotaNoticeDismissed(true)}
+          />
 
           {attachments.length > 0 && (
             <div className="pending-attachments">
@@ -2333,9 +2471,14 @@ export default function App() {
                         onClick={() => {
                           if (isSuperDepleted) {
                             updateSetting('selectedModel', FAST_MODEL_TIER);
+                            setAutoSwitchedToLite(true);
+                            setQuotaNoticeDismissed(false);
                             setCreditsExhaustedHighlight(true);
                             setModelMenuOpen(false);
                             return;
+                          }
+                          if (opt.id === SUPER_MODEL_TIER) {
+                            setAutoSwitchedToLite(false);
                           }
                           updateSetting('selectedModel', opt.id);
                           setModelMenuOpen(false);
@@ -2438,18 +2581,6 @@ export default function App() {
                   : (imageMode ? t.imagePlaceholder : t.placeholder)
               }
             />
-
-            <button
-              type="button"
-              className={`ui-icon-button mic-button ${isListening ? 'mic-button-active' : ''} ${!isSpeechSupported ? 'mic-button-unsupported' : ''}`}
-              onClick={handleToggleVoiceDictation}
-              disabled={isSending}
-              aria-pressed={isListening}
-              aria-label={isListening ? t.voiceStop : t.voiceStart}
-              title={isSpeechSupported ? (isListening ? t.voiceStop : t.voiceStart) : t.voiceUnsupported}
-            >
-              {isListening ? <StopMicIcon /> : <MicIcon />}
-            </button>
 
             <button
               type="button"
@@ -2657,6 +2788,8 @@ export default function App() {
           usersList={adminUsersList}
           analytics={adminAnalytics}
           onUpdateUserSubscription={adminUpdateUserSubscription}
+          onToggleUserBan={adminUpdateUserBanStatus}
+          currentUserUid={currentUser?.uid || ''}
           langCode={langMeta.code}
           t={t}
         />

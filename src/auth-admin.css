@@ -571,6 +571,64 @@
   background: #321f22;
 }
 
+.auth-domain-helper {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(161, 38, 38, 0.18);
+  display: grid;
+  gap: 6px;
+}
+
+.chat-dark .auth-domain-helper {
+  border-top-color: rgba(255, 180, 173, 0.22);
+}
+
+.auth-domain-hint {
+  font-size: 11px;
+  opacity: 0.92;
+}
+
+.auth-domain-copy-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.auth-domain-code {
+  flex: 1 1 180px;
+  min-width: 0;
+  padding: 5px 8px;
+  border-radius: 7px;
+  background: rgba(0, 0, 0, 0.06);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  word-break: break-all;
+  user-select: all;
+}
+
+.chat-dark .auth-domain-code {
+  background: rgba(0, 0, 0, 0.34);
+}
+
+.auth-domain-copy-btn {
+  flex: 0 0 auto;
+  min-height: 28px;
+  padding: 4px 10px;
+  border: 1px solid currentColor;
+  border-radius: 7px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.auth-domain-copy-btn:hover {
+  opacity: 0.85;
+}
+
 .auth-success {
   padding: 10px 12px;
   border: 1px solid #39a8794d;
@@ -1270,9 +1328,285 @@
     grid-template-columns: 1fr;
   }
 
+  .admin-ban-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .admin-ban-action-btn {
+    width: 100%;
+  }
+
   .chat-app input:not([type='checkbox']),
   .chat-app textarea,
   .chat-app select {
     font-size: 16px;
   }
 }
+
+/* Admin Ban Users Management */
+.admin-ban-users-btn {
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border: 1px solid #d9302555;
+  border-radius: 10px;
+  color: #b42318;
+  background: #fff1f2;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform .15s ease, background .15s ease, border-color .15s ease;
+}
+
+.admin-ban-users-btn:hover {
+  transform: translateY(-1px);
+  background: #ffe4e6;
+  border-color: #d9302588;
+}
+
+.admin-ban-users-btn.is-open {
+  color: #fff;
+  background: #b42318;
+  border-color: #b42318;
+}
+
+.chat-dark .admin-ban-users-btn {
+  color: #fca5a5;
+  background: #3b181c;
+  border-color: #7f1d1d;
+}
+
+.chat-dark .admin-ban-users-btn:hover {
+  background: #4c1d22;
+}
+
+.chat-dark .admin-ban-users-btn.is-open {
+  color: #fff;
+  background: #b91c1c;
+  border-color: #dc2626;
+}
+
+.admin-ban-users-btn:focus-visible,
+.admin-ban-action-btn:focus-visible,
+.banned-logout-button:focus-visible {
+  outline: 2px solid #7567ed;
+  outline-offset: 2px;
+}
+
+.admin-ban-users-count {
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+}
+
+.admin-ban-panel {
+  display: grid;
+  gap: 10px;
+  animation: admin-dropdown-fade .16s ease;
+}
+
+.admin-ban-list {
+  display: grid;
+  gap: 8px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.admin-ban-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 13px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.admin-ban-row.is-banned {
+  border-color: #f2c7c7;
+  background: #fff6f6;
+}
+
+.chat-dark .admin-ban-row.is-banned {
+  border-color: #5b252a;
+  background: #281619;
+}
+
+.admin-ban-user-info {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.admin-ban-user-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.admin-ban-user-head strong {
+  font-size: 13px;
+  color: var(--text);
+}
+
+.admin-ban-status-badge {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.admin-ban-status-badge.status-active {
+  color: #166534;
+  background: #dcfce7;
+  border: 1px solid #86efac;
+}
+
+.admin-ban-status-badge.status-banned {
+  color: #991b1b;
+  background: #fee2e2;
+  border: 1px solid #fca5a5;
+}
+
+.chat-dark .admin-ban-status-badge.status-active {
+  color: #86efac;
+  background: #132a1d;
+  border-color: #25593d;
+}
+
+.chat-dark .admin-ban-status-badge.status-banned {
+  color: #fca5a5;
+  background: #3b181c;
+  border-color: #7f1d1d;
+}
+
+.admin-ban-user-email {
+  color: var(--muted);
+  font-size: 11px;
+  word-break: break-word;
+}
+
+.admin-ban-user-uid {
+  color: var(--muted);
+  font-size: 10px;
+  opacity: 0.82;
+  word-break: break-all;
+}
+
+.admin-ban-action-btn {
+  flex: 0 0 auto;
+  min-width: 94px;
+  min-height: 36px;
+  padding: 6px 14px;
+  border-radius: 9px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform .15s ease, opacity .15s ease, background .15s ease;
+}
+
+.admin-ban-action-btn.is-ban {
+  border: 0;
+  color: #fff;
+  background: #b42318;
+}
+
+.admin-ban-action-btn.is-ban:hover:not(:disabled) {
+  background: #912018;
+  transform: translateY(-1px);
+}
+
+.admin-ban-action-btn.is-unban {
+  border: 1px solid #16653444;
+  color: #166534;
+  background: #ecfdf3;
+}
+
+.admin-ban-action-btn.is-unban:hover:not(:disabled) {
+  background: #dcfce7;
+  transform: translateY(-1px);
+}
+
+.chat-dark .admin-ban-action-btn.is-unban {
+  border-color: #25593d;
+  color: #86efac;
+  background: #132a1d;
+}
+
+.admin-ban-action-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Fullscreen Banned Lockout Screen */
+.chat-banned-screen {
+  min-height: 100dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--bg, #f7f8fa);
+  color: var(--text, #14171f);
+}
+
+.chat-dark.chat-banned-screen {
+  background: #0d0f14;
+  color: #f3f4f6;
+}
+
+.banned-card {
+  width: min(100%, 420px);
+  padding: 36px 28px;
+  border: 1px solid var(--line, #e2e6ef);
+  border-radius: 22px;
+  background: var(--surface, #ffffff);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.14);
+  display: grid;
+  justify-items: center;
+  gap: 22px;
+  text-align: center;
+}
+
+.banned-title {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 800;
+  color: #b42318;
+}
+
+.chat-dark .banned-title {
+  color: #f87171;
+}
+
+.banned-logout-button {
+  min-width: 170px;
+  min-height: 44px;
+  padding: 10px 22px;
+  border: 0;
+  border-radius: 12px;
+  background: #20232a;
+  color: #fff;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform .15s ease, opacity .15s ease;
+}
+
+.chat-dark .banned-logout-button {
+  background: #f1f3f6;
+  color: #17191f;
+}
+
+.banned-logout-button:hover {
+  transform: translateY(-1px);
+  opacity: 0.92;
+}
+

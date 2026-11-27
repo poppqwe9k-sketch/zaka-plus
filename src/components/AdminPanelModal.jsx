@@ -6,7 +6,9 @@ import {
   computeDualModelCapacitySummary,
   filterAndSortUsers,
   filterUsersDirectory,
+  isAdminAccountRecord,
   isPaidPlanUser,
+  isUserBanned,
   normalizePlan
 } from '../utils/authAdmin.js';
 import { formatPacificResetCountdown } from '../utils/pacificTime.js';
@@ -190,13 +192,20 @@ export default function AdminPanelModal({
   usersList,
   analytics,
   onUpdateUserSubscription,
+  onToggleUserBan,
+  currentUserUid = '',
   initialVisitsUsersOpen = false,
+  initialBanUsersOpen = false,
   langCode = 'ar',
   t
 }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeDirectoryTab, setActiveDirectoryTab] = useState('paid');
   const [visitsUsersOpen, setVisitsUsersOpen] = useState(Boolean(initialVisitsUsersOpen));
+  const [banUsersOpen, setBanUsersOpen] = useState(Boolean(initialBanUsersOpen));
+  const [banBusyUid, setBanBusyUid] = useState('');
+  const [banFeedback, setBanFeedback] = useState('');
+  const [banError, setBanError] = useState('');
   const [feedback, setFeedback] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
   const [refreshing, setRefreshing] = useState(false);
@@ -209,9 +218,13 @@ export default function AdminPanelModal({
     if (open) {
       setFeedback('');
       setErrorMsg('');
+      setBanFeedback('');
+      setBanError('');
+      setBanBusyUid('');
       setRefreshNotice('');
       setActiveDirectoryTab('paid');
       setVisitsUsersOpen(Boolean(initialVisitsUsersOpen));
+      setBanUsersOpen(Boolean(initialBanUsersOpen));
       setNowMs(Date.now());
       onRefreshQuota?.();
     }
@@ -221,7 +234,7 @@ export default function AdminPanelModal({
         refreshTimerRef.current = null;
       }
     };
-  }, [open, onRefreshQuota, initialVisitsUsersOpen]);
+  }, [open, onRefreshQuota, initialVisitsUsersOpen, initialBanUsersOpen]);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -296,6 +309,31 @@ export default function AdminPanelModal({
       setFeedback(t.adminSaveSuccess);
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : t.genericError);
+    }
+  }
+
+  async function handleToggleBanUser(userRecord) {
+    const targetUid = userRecord?.uid || userRecord?.id || '';
+    if (!targetUid || banBusyUid) return;
+    if (isAdminAccountRecord(userRecord, currentUserUid)) {
+      setBanError(t.adminBanSelfBlocked || 'لا يمكن حظر حساب المسؤول');
+      return;
+    }
+    const nextBanned = !isUserBanned(userRecord);
+    setBanBusyUid(targetUid);
+    setBanError('');
+    setBanFeedback('');
+    try {
+      await onToggleUserBan?.(targetUid, nextBanned);
+      setBanFeedback(
+        nextBanned
+          ? (t.adminBanUpdatedSuccess || 'تم حظر المستخدم بنجاح.')
+          : (t.adminUnbanUpdatedSuccess || 'تم إلغاء حظر المستخدم بنجاح.')
+      );
+    } catch (err) {
+      setBanError(err instanceof Error ? err.message : t.genericError);
+    } finally {
+      setBanBusyUid('');
     }
   }
 
@@ -503,6 +541,92 @@ export default function AdminPanelModal({
                       </div>
                     </div>
                   ))
+                )}
+              </div>
+            )}
+          </section>
+
+          {/* Section 2.5: User Ban Management */}
+          <section className="admin-section" data-testid="admin-ban-section">
+            <div className="admin-section-head">
+              <h3>{t.adminBanUsersTitle || 'إدارة وحظر المستخدمين'}</h3>
+              <button
+                type="button"
+                className={`admin-ban-users-btn ${banUsersOpen ? 'is-open' : ''}`}
+                data-testid="admin-ban-users-button"
+                aria-expanded={banUsersOpen}
+                aria-controls="admin-ban-users-panel"
+                onClick={() => setBanUsersOpen((prev) => !prev)}
+              >
+                <span>{t.adminBanUsersButton || 'حظر مستخدمين'}</span>
+                <span className="admin-ban-users-count" data-testid="admin-ban-users-count">
+                  ({allUsersSorted.length})
+                </span>
+              </button>
+            </div>
+
+            {banUsersOpen && (
+              <div
+                id="admin-ban-users-panel"
+                className="admin-ban-panel"
+                data-testid="admin-ban-users-panel"
+              >
+                {banFeedback && (
+                  <div className="admin-feedback" role="status" data-testid="admin-ban-feedback">
+                    {banFeedback}
+                  </div>
+                )}
+                {banError && (
+                  <div className="auth-error" role="alert" data-testid="admin-ban-error">
+                    {banError}
+                  </div>
+                )}
+
+                {allUsersSorted.length === 0 ? (
+                  <div className="admin-empty">{t.adminNoUsersYet}</div>
+                ) : (
+                  <div className="admin-ban-list">
+                    {allUsersSorted.map((u) => {
+                      const targetUid = u.uid || u.id || '';
+                      const banned = isUserBanned(u);
+                      const isProtectedAdmin = isAdminAccountRecord(u, currentUserUid);
+                      const isRowBusy = banBusyUid === targetUid;
+                      return (
+                        <div
+                          key={`ban-${targetUid}`}
+                          className={`admin-ban-row ${banned ? 'is-banned' : ''}`}
+                          data-testid={`admin-ban-row-${targetUid}`}
+                        >
+                          <div className="admin-ban-user-info">
+                            <div className="admin-ban-user-head">
+                              <strong>{u.displayName || t.adminUnnamedUser}</strong>
+                              <span
+                                className={`admin-ban-status-badge ${banned ? 'status-banned' : 'status-active'}`}
+                                data-testid={`admin-ban-status-${targetUid}`}
+                              >
+                                {banned ? (t.adminUserStatusBanned || 'محظور') : (t.adminUserStatusActive || 'نشط')}
+                              </span>
+                            </div>
+                            <span className="admin-ban-user-email">{u.email || targetUid}</span>
+                            <code className="admin-ban-user-uid" dir="ltr">{targetUid}</code>
+                          </div>
+
+                          <button
+                            type="button"
+                            className={`admin-ban-action-btn ${banned ? 'is-unban' : 'is-ban'}`}
+                            data-testid={`admin-ban-toggle-${targetUid}`}
+                            disabled={isRowBusy || isProtectedAdmin}
+                            title={isProtectedAdmin ? (t.adminBanSelfBlocked || 'لا يمكن حظر حساب المسؤول') : undefined}
+                            onClick={() => handleToggleBanUser(u)}
+                          >
+                            {isRowBusy
+                              ? t.authSubmitting
+                              : (banned ? (t.adminUnbanButton || 'إلغاء الحظر') : (t.adminBanButton || 'حظر'))}
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
                 )}
               </div>
             )}

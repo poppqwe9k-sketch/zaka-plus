@@ -47,9 +47,8 @@
   background: var(--surface);
 }
 .chat-dark .chat-header {
-  background: rgba(5, 6, 9, 0.72);
-  backdrop-filter: blur(14px);
-  border-bottom-color: rgba(255, 255, 255, 0.06);
+  background: #050609;
+  border-bottom-color: rgba(255, 255, 255, 0.08);
 }
 .header-brand { display: flex; align-items: center; justify-self: center; gap: 10px; color: var(--text); font-size: 16px; font-weight: 700; }
 .header-brand img, .sidebar-brand img, .welcome-logo, .message-avatar { display: block; object-fit: contain; }
@@ -82,24 +81,22 @@
 .nebula-orb {
   position: absolute;
   border-radius: 999px;
-  filter: blur(74px);
-  will-change: transform;
 }
 .nebula-orb-blue {
-  width: min(64vw, 580px);
-  height: min(64vw, 580px);
-  top: 38%;
+  width: min(68vw, 640px);
+  height: min(68vw, 640px);
+  top: 40%;
   left: 43%;
   transform: translate(-50%, -50%);
-  background: radial-gradient(circle, rgba(59, 130, 246, 0.27) 0%, rgba(37, 99, 235, 0.1) 46%, transparent 72%);
+  background: radial-gradient(circle, rgba(59, 130, 246, 0.22) 0%, rgba(37, 99, 235, 0.07) 44%, transparent 72%);
 }
 .nebula-orb-pink {
-  width: min(60vw, 540px);
-  height: min(60vw, 540px);
-  top: 41%;
+  width: min(64vw, 600px);
+  height: min(64vw, 600px);
+  top: 43%;
   left: 58%;
   transform: translate(-50%, -50%);
-  background: radial-gradient(circle, rgba(236, 72, 153, 0.24) 0%, rgba(219, 39, 119, 0.09) 46%, transparent 72%);
+  background: radial-gradient(circle, rgba(236, 72, 153, 0.2) 0%, rgba(219, 39, 119, 0.06) 44%, transparent 72%);
 }
 .chat-app:not(.chat-dark) .nebula-orb {
   opacity: 0.3;
@@ -125,19 +122,19 @@
   margin: 0 auto 22px;
   display: grid;
   place-items: center;
+  will-change: transform;
 }
 .welcome-emblem-aura {
   position: absolute;
-  inset: -14px;
+  inset: -64px;
   border-radius: 999px;
   background:
-    radial-gradient(circle at 36% 36%, rgba(59, 130, 246, 0.42), transparent 62%),
-    radial-gradient(circle at 66% 64%, rgba(236, 72, 153, 0.34), transparent 64%);
-  filter: blur(22px);
+    radial-gradient(circle at 42% 44%, rgba(59, 130, 246, 0.24) 0%, transparent 56%),
+    radial-gradient(circle at 58% 56%, rgba(236, 72, 153, 0.18) 0%, transparent 58%);
   pointer-events: none;
 }
 .chat-app:not(.chat-dark) .welcome-emblem-aura {
-  opacity: 0.48;
+  opacity: 0.42;
 }
 .welcome-emblem-svg {
   position: relative;
@@ -145,13 +142,9 @@
   width: 108px;
   height: 108px;
   color: #17191f;
-  filter: drop-shadow(0 6px 18px rgba(59, 130, 246, 0.16));
 }
 .chat-dark .welcome-emblem-svg {
   color: #ffffff;
-  filter:
-    drop-shadow(0 0 18px rgba(147, 197, 253, 0.38))
-    drop-shadow(0 0 36px rgba(244, 114, 182, 0.24));
 }
 .welcome-logo { margin: 0 auto 20px; border-radius: 18px; box-shadow: 0 8px 26px #00000010; }
 .welcome-card h1 { margin: 0; color: var(--text); font-size: clamp(26px, 4vw, 36px); font-weight: 650; letter-spacing: -.4px; text-wrap: balance; }
@@ -185,13 +178,11 @@
   margin: 0;
   padding: 9px clamp(16px, 3.5vw, 40px) max(11px, env(safe-area-inset-bottom));
   border-top: 1px solid var(--line);
-  background: rgba(247, 248, 250, 0.86);
-  backdrop-filter: blur(18px);
+  background: var(--page);
 }
 .chat-dark .chat-main > .composer-area {
   border-top-color: rgba(255, 255, 255, 0.08);
-  background: linear-gradient(180deg, rgba(10, 12, 18, 0.56) 0%, rgba(5, 6, 9, 0.88) 100%);
-  backdrop-filter: blur(20px);
+  background: #050609;
 }
 .composer-inner {
   width: min(100%, 960px);

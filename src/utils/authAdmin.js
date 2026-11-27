@@ -26,6 +26,19 @@ export function isAdminEmailUnverified(user) {
   return user.email.trim().toLowerCase() === ADMIN_EMAIL && user.emailVerified !== true;
 }
 
+export function isUserBanned(profile) {
+  return Boolean(profile && profile.banned === true);
+}
+
+export function isAdminAccountRecord(userRecord, currentAdminUid = '') {
+  if (!userRecord || typeof userRecord !== 'object') return false;
+  const emailMatch = typeof userRecord.email === 'string'
+    && userRecord.email.trim().toLowerCase() === ADMIN_EMAIL;
+  const uidMatch = Boolean(currentAdminUid)
+    && (userRecord.uid === currentAdminUid || userRecord.id === currentAdminUid);
+  return emailMatch || uidMatch;
+}
+
 export function sanitizeDisplayName(rawName, email = '') {
   const fromName = typeof rawName === 'string' ? rawName.trim() : '';
   if (fromName) return fromName.slice(0, 100);
@@ -74,7 +87,8 @@ export function buildInitialUserProfile({
     cycleStartedAt: Math.max(0, Math.floor(now)),
     lastResetDate: String(todayKey || getLocalDateKey()).slice(0, 20),
     totalUsed: 0,
-    visitsCount: 1
+    visitsCount: 1,
+    banned: false
   };
 }
 
@@ -252,8 +266,12 @@ export function filterAndSortUsers(users = [], query = '') {
     ? list.filter((u) => {
         const name = String(u?.displayName || '').toLowerCase();
         const email = String(u?.email || '').toLowerCase();
+        const uid = String(u?.uid || u?.id || '').toLowerCase();
         const plan = String(u?.plan || '').toLowerCase();
-        return name.includes(trimmed) || email.includes(trimmed) || plan.includes(trimmed);
+        return name.includes(trimmed)
+          || email.includes(trimmed)
+          || uid.includes(trimmed)
+          || plan.includes(trimmed);
       })
     : list;
 
